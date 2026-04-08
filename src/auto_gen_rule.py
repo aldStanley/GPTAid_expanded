@@ -1,12 +1,18 @@
 import json
 import os
 import sys
-import openai
 import time
 import subprocess
 import parse_wrong_diff
 import tiktoken
 import re
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'))
+gemini_api_key = os.environ.get('GEMINI_API_KEY', '')
+gemini_model = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash')
+genai.configure(api_key=gemini_api_key)
 
 gpt_token_small_limit = 4000
 gpt_token_large_limit = 16000
@@ -80,6 +86,37 @@ def get_code(path):
     with open(path, 'r') as f:
         code = f.read()
     return code
+
+def get_callee_code(func_name, func_info_list, max_depth=2):
+    """BFS retrieval of callee source code, bounded to max_depth.
+    Returns dict of {callee_name: source_code_string}.
+    Only retrieves library-internal callees (other_fc), not standard C functions.
+    """
+    visited = set([func_name])
+    result = {}
+    queue = [(func_name, 0)]
+    while queue:
+        current, depth = queue.pop(0)
+        if depth >= max_depth:
+            continue
+        current_json = get_value_from_json(func_info_list, current, 'func')
+        if current_json is None:
+            continue
+        for callee in current_json.get('other_fc', []):
+            if callee in visited:
+                continue
+            visited.add(callee)
+            callee_json = get_value_from_json(func_info_list, callee, 'func')
+            if callee_json and 'path' in callee_json:
+                try:
+                    code = get_code(callee_json['path'])
+                    if code:
+                        result[callee] = code
+                except Exception:
+                    pass
+            queue.append((callee, depth + 1))
+    return result
+
 # e.g. get_value_from_json(list, 'pcap_freecode', 'func') will get json of pcap_freecode
 def get_value_from_json(json_list, key_value, key_match):
     for item in json_list:
@@ -149,7 +186,7 @@ def generate_rule_small_prompt(func, func_code, question, standard_rule_dict: di
     # prompt = prompt + func_code + '\n```\n'
     return prompt
 
-def generate_rule_prompt(func, func_code, declaration, question, standard_rule_dict: dict, other_rule_dict: dict, para_index, para_name, if_ret):
+def generate_rule_prompt(func, func_code, declaration, question, standard_rule_dict: dict, other_rule_dict: dict, para_index, para_name, if_ret, callee_code_dict=None):
     num_Al = chr(ord('A') - 1)
     prefix = question.replace('FUNC_NAME', func)
     prompt = prefix.replace('SOURCE_CODE', func_code)
@@ -159,9 +196,16 @@ def generate_rule_prompt(func, func_code, declaration, question, standard_rule_d
     else:
         prompt = prompt.replace('PARA_NAME', para_name)
         prompt = prompt.replace('Parameter_Info', 'return value')
+    if callee_code_dict:
+        callee_section = ''
+        for name, code in callee_code_dict.items():
+            callee_section += '\nSource code of called function `' + name + '`:\n```\n' + code + '\n```\n'
+        prompt = prompt.replace('CALLEE_CODE', callee_section)
+    else:
+        prompt = prompt.replace('CALLEE_CODE', '')
     if len(other_rule_dict.keys()) != 0:
         add_info = 'Additional Info: \n'
-        
+
         for key in other_rule_dict.keys():
             num_Al = chr(ord(num_Al) + 1)
             add_info = add_info + '\tRules of function `' + key + '`: \n'
@@ -185,7 +229,7 @@ def generate_rule_prompt(func, func_code, declaration, question, standard_rule_d
     #     for rule in standard_rule_dict[key]:
     #         prompt = prompt + '\t' + str(i) + '. ' + rule + '\n'
     #         i += 1
-    
+
     # prompt = prompt + '```'
     return prompt
   
@@ -285,108 +329,59 @@ def parse_rule(response):
     return out_dict_list
 
 def query_gpt(prompt, message_before, temprature_in, big_flag):
-
-    print('waiting for gpt...')
+    print('waiting for gemini...')
     global one_query
     global gpt_answer_index
     global token_num
-    global api_key
-    global orig_key
     answer_path = gpt_answer_dir + '/' + str(gpt_answer_index)
     gpt_answer_index += 1
 
-    openai.project_key = orig_key
-    openai.api_key = api_key
-    flag = ""
     if prompt != '':
         message_before.append({"role": "user", "content": prompt})
-    token_before = 0   
-    for message in message_before:
-        token_before += len(message['content'])
-    if token_before > gpt_token_small_limit:
-        token_limit = gpt_token_large_limit
-        model_select = "gpt-4o-mini"
-    elif token_before > gpt_token_large_limit:
+
+    token_before = sum(len(m['content']) for m in message_before)
+    if token_before > gpt_token_large_limit:
         return '', token_before
-    token_limit = gpt_token_small_limit
-    model_select = "gpt-4o-mini"
 
-    num = num_tokens_from_messages(message_before, model_select)
+    # convert OpenAI-style messages to Gemini format
+    history = []
+    for msg in message_before[:-1]:
+        role = "model" if msg["role"] == "assistant" else "user"
+        history.append({"role": role, "parts": [{"text": msg["content"]}]})
+    current_text = message_before[-1]["content"]
 
-    if num > gpt_token_small_limit and model_select == 'gpt-4o-mini':
-        
-        if big_flag:
-            model_select = 'gpt-4o-mini'
-        else:
-            return '', num
-    while flag == "":
-        try:  
+    while True:
+        try:
             one_query += 1
-            response = openai.ChatCompletion.create( 
-            model=model_select, 
-            temperature=temprature_in,
-            messages=message_before,
-            timeout=30)
-            if response == None:
-                flag = ""
-
-                continue
-
-            token = response['usage']['total_tokens']
+            model = genai.GenerativeModel(
+                model_name=gemini_model,
+                generation_config={"temperature": temprature_in}
+            )
+            chat = model.start_chat(history=history)
+            response = chat.send_message(current_text)
+            token = response.usage_metadata.total_token_count
             token_num += token
-            finish_reason = response["choices"][0]["finish_reason"]
-            response = response["choices"][0]["message"]["content"].strip('\n')
-            
-            
-            if finish_reason == 'length':
-
-                if model_select == "gpt-4o-mini":
-                    model_select = 'gpt-4o-mini'
-
-                else:
-
-                    return '', gpt_token_large_limit
-            flag = response
-
-            out_string = 'Question: \n' + prompt + '\n\n' + 'Answer: \n' + response
+            response_text = response.text.strip('\n')
 
             out_string = ''
             for item in message_before:
                 if item['role'] == 'user':
-                    out_string  = out_string + '\nQuestion: \n' + item['content'] + '\n'
+                    out_string += '\nQuestion: \n' + item['content'] + '\n'
                 else:
-                    out_string  = out_string + '\nAnswer: \n' + item['content'] + '\n'
-            out_string = out_string + '\nAnswer: \n' + response + '\n'
-
+                    out_string += '\nAnswer: \n' + item['content'] + '\n'
+            out_string += '\nAnswer: \n' + response_text + '\n'
             with open(answer_path, 'w') as f:
                 f.write(out_string)
-            return response, token
-        except openai.OpenAIError as e:
-            if "tokens" in str(e):
-                if big_flag and token_limit == gpt_token_small_limit:
-                    token_limit = gpt_token_large_limit
-                    model_select = 'gpt-4o-mini'
-                else:
-                    # Handle token limit exceeded error
-                    print("Input text exceeds the maximum token limit.")
-                    return '', token_limit
-            else:
-                # Handle other API errors
-                print("An error occurred:", e)
-                return '', token_limit
-        except:
-            print("Connection refused by the server..")
+            return response_text, token
+        except Exception as e:
+            print("An error occurred:", e)
+            if 'quota' in str(e).lower() or 'rate' in str(e).lower() or '429' in str(e):
+                print("Rate limit, sleeping 5 seconds...")
+                time.sleep(5)
+                continue
+            return '', 0
 
-            print("Let me sleep for 5 seconds")
 
-            print("ZZzzzz...")
-
-            time.sleep(5)
-
-            print("Was a nice sleep, now let me continue...")
-
-            continue
-    
 
 def generate_rightcode_prompt(func, lib, func_code, rule_list, question):
     prompt = question.replace('FUNC_NAME', func).replace('LIB_NAME', lib)
@@ -970,7 +965,7 @@ def get_para_index(para_name, para_dict_list):
     return -1
 
 
-def gen_rule_list(api, code, prefix_first, prefix_repeat, func_info_list, out_log_prefix, out_rule):
+def gen_rule_list(api, code, prefix_first, prefix_repeat, func_info_list, out_log_prefix, out_rule, retrieval_depth=2):
     print('Parse ' + api + '...\n')
     parse_order = get_call_order(api, func_info_list)
 
@@ -1020,6 +1015,9 @@ def gen_rule_list(api, code, prefix_first, prefix_repeat, func_info_list, out_lo
         # get other rules:
         other_fc = func_json['other_fc']
 
+        # retrieve callee source code (bounded inter-procedural, depth <= retrieval_depth)
+        callee_code_dict = get_callee_code(func, func_info_list, max_depth=retrieval_depth)
+
         para_index = 1
         rule_list = list()
         para_num = len(para_dict_list)
@@ -1038,9 +1036,9 @@ def gen_rule_list(api, code, prefix_first, prefix_repeat, func_info_list, out_lo
                 continue
             para_prefix = 'Parameter ' + str(para_index) + ': '
             if para['type'] != 'ret':
-                prompt_first = generate_rule_prompt(func, code, func_decla, prefix_first, standard_rule_dict, other_rule_dict, para_index, para['name'], False)
+                prompt_first = generate_rule_prompt(func, code, func_decla, prefix_first, standard_rule_dict, other_rule_dict, para_index, para['name'], False, callee_code_dict=callee_code_dict)
             else:
-                prompt_first = generate_rule_prompt(func, code, func_decla, prefix_first, standard_rule_dict, other_rule_dict, para_index, para['name'], True)
+                prompt_first = generate_rule_prompt(func, code, func_decla, prefix_first, standard_rule_dict, other_rule_dict, para_index, para['name'], True, callee_code_dict=callee_code_dict)
             # exit(1)
             # prompt_repeat = prefix_repeat.replace('FUNC_NAME', func)
             # repeat_limit = 3
@@ -1182,7 +1180,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log):
     with open(func_code_out, 'w') as f:
         f.write(func_code)
 
-    rule_list, token_rule, parse_order = gen_rule_list(api, func_code, question_rule, 'notused', func_info_list, rule_out, lib_rule)
+    rule_list, token_rule, parse_order = gen_rule_list(api, func_code, question_rule, 'notused', func_info_list, rule_out, lib_rule, retrieval_depth=retrieval_depth)
     # return True
     rule_list_desc = list()
     for item in rule_list:
@@ -1245,14 +1243,17 @@ if __name__ == '__main__':
     question_dir = '../prompt/'
     
     # CHANGE
-    orig_key = ''
-    api_key = ''
-    
     api_path = '../test_info/api_info/api_list'
     callgraph_path = '../test_info/api_info/call_graph'
-    
+
     out_dir = '../test_info/out_gen_rule/'
+
+    config_path = '../config.json'
     # END
+
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    retrieval_depth = config.get('retrieval_depth', 2)
     all_log = out_dir + '/auto_rule_info'
     gpt_answer_dir = out_dir + '/gpt_re/'
     in_info_list = list()
@@ -1291,7 +1292,8 @@ if __name__ == '__main__':
         else:
             callgraph_index[func_name].append(list_index)
     api_list = read_API(api_path)
-    
+    print(f'\n=== Stage 1: Generating rules for {len(api_list)} API(s) ===\n')
+
     # get question dict:
     # parse_question_prefix
     # with open(parse_question_prefix, 'r') as f:
@@ -1311,7 +1313,8 @@ if __name__ == '__main__':
     api_num = 0
     for api in api_list:
         api_num += 1
-        one_query = 0 
+        print(f'[{api_num}/{len(api_list)}] {api}')
+        one_query = 0
         token_num = 0
         token_all_big += token_num
         # get callgraph:

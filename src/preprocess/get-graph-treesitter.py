@@ -140,7 +140,7 @@ if __name__ == '__main__':
             print(out_dict)
             with open(out_func_path, 'w') as f:
                 f.write(func_content + '\n')
-            calls = func.children_by_type_name('call_expression')
+            calls = func.descendants_by_type_name('call_expression')
             call_list = list()
             for call in calls:
                 call_name = str(call.function)

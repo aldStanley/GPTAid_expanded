@@ -1,12 +1,18 @@
 import json
 import os
 import sys
-import openai
 import time
 import subprocess
 import parse_wrong_diff
 import identify_error
 import tiktoken
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'))
+gemini_api_key = os.environ.get('GEMINI_API_KEY', '')
+gemini_model = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash')
+genai.configure(api_key=gemini_api_key)
 
 gpt_token_small_limit = 4000
 gpt_token_large_limit = 16000
@@ -280,97 +286,59 @@ def parse_desc(rule):
     return out_list
 
 def query_gpt(prompt, message_before, temprature_in, big_flag):
-    # answer = ''
-    # return answer
-    print('waiting for gpt...')
+    print('waiting for gemini...')
     global one_query
     global gpt_answer_index
     global token_num
-    global orig_key
-    global api_key
     answer_path = gpt_answer_dir + '/' + str(gpt_answer_index)
     gpt_answer_index += 1
 
-    openai.organization = orig_key
-    openai.api_key = api_key
-    flag = ""
     if prompt != '':
         message_before.append({"role": "user", "content": prompt})
-    token_before = 0   
-    for message in message_before:
-        token_before += len(message['content'])
-    if token_before > gpt_token_small_limit:
-        token_limit = gpt_token_large_limit
-        model_select = "gpt-4o-mini"
-    elif token_before > gpt_token_large_limit:
+
+    token_before = sum(len(m['content']) for m in message_before)
+    if token_before > gpt_token_large_limit:
         return '', token_before
-    token_limit = gpt_token_small_limit
-    model_select = "gpt-4o-mini"
-    while flag == "":
-        try:  
+
+    # convert OpenAI-style messages to Gemini format
+    history = []
+    for msg in message_before[:-1]:
+        role = "model" if msg["role"] == "assistant" else "user"
+        history.append({"role": role, "parts": [{"text": msg["content"]}]})
+    current_text = message_before[-1]["content"]
+
+    while True:
+        try:
             one_query += 1
-            response = openai.ChatCompletion.create( 
-            model=model_select, 
-            temperature=temprature_in,
-            messages=message_before,
-            timeout=30)
-            if response == None:
-                flag = ""
-                continue
-            token = response['usage']['total_tokens']
+            model = genai.GenerativeModel(
+                model_name=gemini_model,
+                generation_config={"temperature": temprature_in}
+            )
+            chat = model.start_chat(history=history)
+            response = chat.send_message(current_text)
+            token = response.usage_metadata.total_token_count
             token_num += token
-            finish_reason = response["choices"][0]["finish_reason"]
-            response = response["choices"][0]["message"]["content"].strip('\n')
-
-            if finish_reason == 'length':
-                if model_select == "gpt-4o-mini" and big_flag:
-                    model_select = 'gpt-4o-mini'
-                    continue
-                else:
-                    return '', gpt_token_large_limit
-            flag = response
-
-            out_string = 'Question: \n' + prompt + '\n\n' + 'Answer: \n' + response
+            response_text = response.text.strip('\n')
 
             out_string = ''
             for item in message_before:
                 if item['role'] == 'user':
-                    out_string  = out_string + '\nQuestion: \n' + item['content'] + '\n'
+                    out_string += '\nQuestion: \n' + item['content'] + '\n'
                 else:
-                    out_string  = out_string + '\nAnswer: \n' + item['content'] + '\n'
-            out_string = out_string + '\nAnswer: \n' + response + '\n'
+                    out_string += '\nAnswer: \n' + item['content'] + '\n'
+            out_string += '\nAnswer: \n' + response_text + '\n'
             with open(answer_path, 'w') as f:
                 f.write(out_string)
-            return response, token
-        except openai.OpenAIError as e:
-            if "tokens" in str(e):
-                if big_flag and token_limit == gpt_token_small_limit:
-                    token_limit = gpt_token_large_limit
-                    model_select = 'gpt-4o-mini'
-                else:
-                    # Handle token limit exceeded error
-                    print("Input text exceeds the maximum token limit.")
-                    return '', token_limit
-            else:
-                # Handle other API errors
-                print("An error occurred:", e)
-                if str(e).lower().find('connection') != -1:
-                    print('Cannot connect to OpenAI!')
-                    exit(1)
-                return '', token_limit
-        except:
-            print("Connection refused by the server..")
+            return response_text, token
+        except Exception as e:
+            print("An error occurred:", e)
+            if 'quota' in str(e).lower() or 'rate' in str(e).lower() or '429' in str(e):
+                print("Rate limit, sleeping 5 seconds...")
+                time.sleep(5)
+                continue
+            return '', 0
 
-            print("Let me sleep for 5 seconds")
 
-            print("ZZzzzz...")
-
-            time.sleep(5)
-
-            print("Was a nice sleep, now let me continue...")
-
-            continue
-    
 
 def generate_rightcode_prompt(func, lib, func_code, question):
     prompt = question.replace('FUNC_NAME', func).replace('LIB_NAME', lib).replace('SOURCE_CODE', func_code)
@@ -1366,6 +1334,7 @@ def generate_wrong_code(api, lib, rule_list, question_dict, out_log_prefix, out_
         violation_code = rule_dict['code']
 
         i += 1
+        print(f'  Rule {i}/{len(rule_list)}: generating violation code...')
         if api == 'RSA_private_decrypt' and (3 not in get_related_index(rule)):
             continue
 
@@ -1666,7 +1635,7 @@ def generate_right_code(api, lib, question_dict, out_log, code):
 
             f.write(out_content)
     else:
-
+        print('  Compiling and running right code...')
         flag, output, error_stage = compile_run(right_code, api, compile_cmd, compile_valgrind_cmd, lib)
         if error_stage =='error-handling':
             error_handling_code = right_code
@@ -1737,6 +1706,7 @@ def generate_right_code(api, lib, question_dict, out_log, code):
         # TODO test
         right_code, token_fix, prev_msg = auto_fix_once(output, right_code, lib, compile_cmd, fix_method, prev_msg, None)
         fix_times += 1
+        print(f'  Fixing right code (attempt {fix_times})...')
         token_before_all += token_fix
         if right_code == '':
             with open(out_log, 'a') as f:
@@ -2098,14 +2068,12 @@ if __name__ == '__main__':
         fix_temperature = right_temperature
     question_dir = '../prompt/'
     # CHANGE
-    orig_key = ''
-    api_key = ''
     root_passwd = ''
     api_path = '../test_info/api_info/api_list'
     callgraph_path = '../test_info/api_info/call_graph'
     
-    info_dir = '../test_info/out_right_code/'
-    out_dir = '../test_info/out_wrong_code/'
+    info_dir = '../test_info/out_gen_rule'
+    out_dir = '../test_info/out_wrong_code'
     # END
     
     info_log = info_dir + '/auto_rule_info'
@@ -2158,7 +2126,8 @@ if __name__ == '__main__':
         else:
             callgraph_index[func_name].append(list_index)
     api_list = read_API(api_path)
-    
+    print(f'\n=== Stage 2 ({auto_flag}): Processing {len(api_list)} API(s) ===\n')
+
     # get question dict:
     with open(rule_question_prefix, 'r') as f:
         question_dict['rule'] = f.read()

@@ -1,7 +1,6 @@
 import json
 import os
 import sys
-import openai
 import time
 import subprocess
 import parse_wrong_diff
@@ -9,6 +8,13 @@ import identify_error
 import tiktoken
 import re
 import copy
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'))
+gemini_api_key = os.environ.get('GEMINI_API_KEY', '')
+gemini_model = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash')
+genai.configure(api_key=gemini_api_key)
 
 gpt_token_small_limit = 4000
 gpt_token_large_limit = 16000
@@ -281,104 +287,59 @@ def parse_desc(rule):
     return out_list
 
 def query_gpt(prompt, message_before, temprature_in, big_flag):
-    # answer = ''
-    # return answer
-    print('waiting for gpt...')
-    # print(prompt)
+    print('waiting for gemini...')
     global one_query
     global gpt_answer_index
     global token_num
-    global api_key
-    global orig_key
     answer_path = gpt_answer_dir + '/' + str(gpt_answer_index)
     gpt_answer_index += 1
-    # if token_num > 500000:
-    #     # print('too many token!')
-    # Personal:
-    openai.organization = orig_key
-    openai.api_key = api_key
-    flag = ""
+
     if prompt != '':
         message_before.append({"role": "user", "content": prompt})
-    token_before = 0   
-    for message in message_before:
-        token_before += len(message['content'])
-    if token_before > gpt_token_small_limit:
-        token_limit = gpt_token_large_limit
-        model_select = "gpt-4o-mini"
-    elif token_before > gpt_token_large_limit:
+
+    token_before = sum(len(m['content']) for m in message_before)
+    if token_before > gpt_token_large_limit:
         return '', token_before
-    token_limit = gpt_token_small_limit
-    model_select = "gpt-4o-mini"
-    while flag == "":
-        try:  
+
+    # convert OpenAI-style messages to Gemini format
+    history = []
+    for msg in message_before[:-1]:
+        role = "model" if msg["role"] == "assistant" else "user"
+        history.append({"role": role, "parts": [{"text": msg["content"]}]})
+    current_text = message_before[-1]["content"]
+
+    while True:
+        try:
             one_query += 1
-            response = openai.ChatCompletion.create( 
-            model=model_select, 
-            temperature=temprature_in,
-            messages=message_before,
-            timeout=30)
-            if response == None:
-                flag = ""
-                # print('timeout! continue')
-                continue
-            # # print('response:')
-            # print(response)
-            token = response['usage']['total_tokens']
+            model = genai.GenerativeModel(
+                model_name=gemini_model,
+                generation_config={"temperature": temprature_in}
+            )
+            chat = model.start_chat(history=history)
+            response = chat.send_message(current_text)
+            token = response.usage_metadata.total_token_count
             token_num += token
-            finish_reason = response["choices"][0]["finish_reason"]
-            response = response["choices"][0]["message"]["content"].strip('\n')
-            # # print(type(response["choices"][0]))
-            
-            
-            if finish_reason == 'length':
-                # print('in finish reason')
-                if model_select == "gpt-4o-mini" and big_flag:
-                    model_select = 'gpt-4o-mini'
-                    continue
-                else:
-                    return '', gpt_token_large_limit
-            flag = response
-            # # print()
-            # # print(response)
-            out_string = 'Question: \n' + prompt + '\n\n' + 'Answer: \n' + response
-            # # print(out_string)
+            response_text = response.text.strip('\n')
+
             out_string = ''
             for item in message_before:
                 if item['role'] == 'user':
-                    out_string  = out_string + '\nQuestion: \n' + item['content'] + '\n'
+                    out_string += '\nQuestion: \n' + item['content'] + '\n'
                 else:
-                    out_string  = out_string + '\nAnswer: \n' + item['content'] + '\n'
-            out_string = out_string + '\nAnswer: \n' + response + '\n'
+                    out_string += '\nAnswer: \n' + item['content'] + '\n'
+            out_string += '\nAnswer: \n' + response_text + '\n'
             with open(answer_path, 'w') as f:
                 f.write(out_string)
-            return response, token
-        except openai.OpenAIError as e:
-            if "tokens" in str(e):
-                if big_flag and token_limit == gpt_token_small_limit:
-                    token_limit = gpt_token_large_limit
-                    model_select = 'gpt-4o-mini'
-                else:
-                    # Handle token limit exceeded error
-                    # print("Input text exceeds the maximum token limit.")
-                    return '', token_limit
-            else:
-                # Handle other API errors
-                # print("An error occurred:", e)
-                return '', token_limit
-        except:
-            # print("Connection refused by the server..")
+            return response_text, token
+        except Exception as e:
+            print("An error occurred:", e)
+            if 'quota' in str(e).lower() or 'rate' in str(e).lower() or '429' in str(e):
+                print("Rate limit, sleeping 5 seconds...")
+                time.sleep(5)
+                continue
+            return '', 0
 
-            # print("Let me sleep for 5 seconds")
 
-            # print("ZZzzzz...")
-
-            time.sleep(5)
-
-            # print("Was a nice sleep, now let me continue...")
-
-            continue
-    
 
 def generate_rightcode_prompt(func, lib, func_code, question):
     prompt = question.replace('FUNC_NAME', func).replace('LIB_NAME', lib)
@@ -1094,6 +1055,25 @@ def gen_final_rule(right_code, wrong_code, api, para_index, prompt_prefix, log_p
     return response, rule_dict, token
 
 
+def query_critic_agent(api, declaration, right_code, violation_code, proposed_rule, log_path, critic_prompt_prefix):
+    """Calls a second LLM to verify whether proposed_rule matches the actual
+    diff between right_code and violation_code. Returns (approved, tokens).
+    """
+    prompt = critic_prompt_prefix.replace('FUNC_NAME', api)
+    prompt = prompt.replace('DECLARATION', declaration)
+    prompt = prompt.replace('RIGHT_CODE', right_code)
+    prompt = prompt.replace('VIOLATION_CODE', violation_code)
+    prompt = prompt.replace('PROPOSED_RULE', proposed_rule)
+
+    response, token = query_gpt(prompt, [], parse_temperature, True)
+
+    with open(log_path + '-critic', 'a') as f:
+        f.write('Critic Question:\n' + prompt + '\nCritic Answer:\n' + response + '\n')
+
+    approved = 'VERDICT: APPROVE' in response
+    return approved, token
+
+
 # output:[[1, 2], [3]]
 def if_asan_same(output_list, code_prefix):
     output_small_list = list()
@@ -1730,8 +1710,20 @@ def parse_final_rule_2(api, lib, rule_list, question_dict, out_log_prefix, out_c
         with open(response_path, 'w') as f:
             f.write(response)
             f.write('\n')
+        # critic agent: validate proposed rule against the code diff
+        if 'critic' in question_dict:
+            critic_rule = parsed_rule['notdo'] if parsed_rule['notdo'] else parsed_rule['do']
+            if critic_rule:
+                approved, critic_token = query_critic_agent(
+                    api, declaration, right_code, wrong_code,
+                    critic_rule, log_path, question_dict['critic']
+                )
+                all_token += critic_token
+                if not approved:
+                    parsed_rule['notdo'] = ''
+                    parsed_rule['do'] = ''
         out_dict = dict()
-        
+
         if flag == 0:
             parsed_rule['notdo'], flag_change1 = if_para_match(api, para_list, parsed_rule['notdo'])
             if flag_change1:
@@ -2194,8 +2186,6 @@ if __name__ == '__main__':
     question_dir = '../prompt/'
     
     # CHANGE
-    orig_key = ''
-    api_key = ''
     api_path = '../test_info/api_info/api_list'
     callgraph_path = '../test_info/api_info/call_graph'
     root_passwd = ''
@@ -2265,6 +2255,9 @@ if __name__ == '__main__':
         question_dict['parse_final_rule2'] = f.read()
     with open(parse_final_rule_prefix_one, 'r') as f:
         question_dict['parse_final_rule2-one'] = f.read()
+    critic_prompt_prefix = question_dir + 'CriticAgent'
+    with open(critic_prompt_prefix, 'r') as f:
+        question_dict['critic'] = f.read()
     api_num = 0
     for api in api_list:
         # print(api)
