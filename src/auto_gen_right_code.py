@@ -14,6 +14,20 @@ gemini_api_key = os.environ.get('GEMINI_API_KEY', '')
 gemini_model = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash')
 genai.configure(api_key=gemini_api_key)
 
+# USD per 1M tokens: (input, output). Update if Gemini pricing changes.
+GEMINI_PRICING = {
+    'gemini-2.0-flash':        (0.10, 0.40),
+    'gemini-2.0-flash-lite':   (0.075, 0.30),
+    'gemini-2.5-flash':        (0.15, 0.60),
+    'gemini-2.5-flash-lite':   (0.10, 0.40),
+    'gemini-1.5-flash':        (0.075, 0.30),
+    'gemini-1.5-pro':          (1.25, 5.00),
+}
+
+def compute_cost(input_tokens, output_tokens):
+    prices = GEMINI_PRICING.get(gemini_model, (0.10, 0.40))
+    return round((input_tokens * prices[0] + output_tokens * prices[1]) / 1_000_000, 6)
+
 gpt_token_small_limit = 4000
 gpt_token_large_limit = 16000
 right_temperature = 1
@@ -290,6 +304,8 @@ def query_gpt(prompt, message_before, temprature_in, big_flag):
     global one_query
     global gpt_answer_index
     global token_num
+    global input_token_num
+    global output_token_num
     answer_path = gpt_answer_dir + '/' + str(gpt_answer_index)
     gpt_answer_index += 1
 
@@ -317,6 +333,8 @@ def query_gpt(prompt, message_before, temprature_in, big_flag):
             chat = model.start_chat(history=history)
             response = chat.send_message(current_text)
             token = response.usage_metadata.total_token_count
+            input_token_num += response.usage_metadata.prompt_token_count
+            output_token_num += response.usage_metadata.candidates_token_count
             token_num += token
             response_text = response.text.strip('\n')
 
@@ -1802,6 +1820,8 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log, 
     print('Parse API: ' + api)
     global one_query
     global token_num
+    global input_token_num
+    global output_token_num
     # if api == 'DH_get_nid':
     #     return True
     # rule_out: rule prompt, output and rule-list
@@ -1848,6 +1868,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log, 
     all_out_dict['Final_Handle_Rule'] = list()
     all_out_dict['Final_Rule_Num'] = 0
     all_out_dict['All_Token'] = 0
+    all_out_dict['All_Cost_USD'] = 0.0
     all_out_dict['Errmsg'] = ''
     env_info = ''
     
@@ -1885,6 +1906,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log, 
             all_out_dict['Right_Code_Success'] = True
             all_out_dict['All_Token'] = info_dict[func_path]['All_Token']
             all_out_dict['All_Query_Times'] = info_dict[func_path]['All_Query_Times']
+            all_out_dict['All_Cost_USD'] = compute_cost(input_token_num, output_token_num)
             with open(all_log, 'a') as f:
                 f.write(json.dumps(all_out_dict))
                 f.write('\n')
@@ -1930,6 +1952,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log, 
             all_out_dict['Errmsg'] = 'Success'
             all_out_dict['All_Token'] = info_dict[func_path]['All_Token']
             all_out_dict['All_Query_Times'] = info_dict[func_path]['All_Query_Times']
+            all_out_dict['All_Cost_USD'] = compute_cost(input_token_num, output_token_num)
             with open(all_log, 'a') as f:
                 f.write(json.dumps(all_out_dict))
                 f.write('\n')
@@ -1949,6 +1972,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log, 
         compile_valgrind_cmd = compile_cmd_valgrind.replace('FUNC_NAME', api) + compile_dict[lib]
 
         if all_out_dict['Right_Code_Success'] == False:
+            all_out_dict['All_Cost_USD'] = compute_cost(input_token_num, output_token_num)
             with open(all_log, 'a') as f:
                 f.write(json.dumps(all_out_dict))
                 f.write('\n')
@@ -1982,6 +2006,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log, 
             all_out_dict['Errmsg'] ='Right Code Wrong'
             all_out_dict['All_Query_Times'] = one_query
             all_out_dict['All_Token'] = token_num
+            all_out_dict['All_Cost_USD'] = compute_cost(input_token_num, output_token_num)
             with open(all_log, 'a') as f:
                 f.write(json.dumps(all_out_dict))
                 f.write('\n')
@@ -1996,6 +2021,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log, 
             # all_out_dict['Errmsg'] = 'Success'
             all_out_dict['All_Query_Times'] = one_query
             all_out_dict['All_Token'] = token_num
+            all_out_dict['All_Cost_USD'] = compute_cost(input_token_num, output_token_num)
             with open(all_log, 'a') as f:
                 f.write(json.dumps(all_out_dict))
                 f.write('\n')
@@ -2023,6 +2049,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log, 
     else:
         all_out_dict['Errmsg'] = 'Wrong Code Error'
     all_out_dict['All_Query_Times'] = one_query
+    all_out_dict['All_Cost_USD'] = compute_cost(input_token_num, output_token_num)
     with open(all_log, 'a') as f:
         f.write(json.dumps(all_out_dict))
         f.write('\n')
@@ -2113,8 +2140,10 @@ if __name__ == '__main__':
 
     one_query = 0
     token_num = 0
+    input_token_num = 0
+    output_token_num = 0
     token_all_big = 0
-    
+
     callgraph_list = read_json(callgraph_path)
     callgraph_index = dict()
     question_dict = dict()
@@ -2148,8 +2177,10 @@ if __name__ == '__main__':
             os.remove(file_name)
         os.system('cp ../example_data/example.db .')
         api_num += 1
-        one_query = 0 
+        one_query = 0
         token_num = 0
+        input_token_num = 0
+        output_token_num = 0
         token_all_big += token_num
         # get callgraph:
         if api not in callgraph_index.keys():
@@ -2205,8 +2236,10 @@ if __name__ == '__main__':
                         print(api + ' already parsed')
                         continue
                     
-                    one_query = 0 
+                    one_query = 0
                     token_num = 0
+                    input_token_num = 0
+                    output_token_num = 0
                     if not os.path.exists(out_dir1):
                         os.mkdir(out_dir1)
                     # continue

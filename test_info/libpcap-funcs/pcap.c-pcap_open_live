@@ -1,0 +1,128 @@
+pcap_t *
+pcap_open_live(const char *device, int snaplen, int promisc, int to_ms, char *errbuf){
+	pcap_t *p;
+	int status;
+#ifdef ENABLE_REMOTE
+	char host[PCAP_BUF_SIZE + 1];
+	char port[PCAP_BUF_SIZE + 1];
+	char name[PCAP_BUF_SIZE + 1];
+	int srctype;
+
+	/*
+	 * A null device name is equivalent to the "any" device -
+	 * which might not be supported on this platform, but
+	 * this means that you'll get a "not supported" error
+	 * rather than, say, a crash when we try to dereference
+	 * the null pointer.
+	 */
+	if (device == NULL)
+		device = "any";
+
+	/*
+	 * Retrofit - we have to make older applications compatible with
+	 * remote capture.
+	 * So we're calling pcap_open_remote() from here; this is a very
+	 * dirty hack.
+	 * Obviously, we cannot exploit all the new features; for instance,
+	 * we cannot send authentication, we cannot use a UDP data connection,
+	 * and so on.
+	 */
+	if (pcap_parsesrcstr(device, &srctype, host, port, name, errbuf))
+		return (NULL);
+
+	if (srctype == PCAP_SRC_IFREMOTE) {
+		/*
+		 * Although we already have host, port and iface, we prefer
+		 * to pass only 'device' to pcap_open_rpcap(), so that it has
+		 * to call pcap_parsesrcstr() again.
+		 * This is less optimized, but much clearer.
+		 */
+		return (pcap_open_rpcap(device, snaplen,
+		    promisc ? PCAP_OPENFLAG_PROMISCUOUS : 0, to_ms,
+		    NULL, errbuf));
+	}
+	if (srctype == PCAP_SRC_FILE) {
+		snprintf(errbuf, PCAP_ERRBUF_SIZE, "unknown URL scheme \"file\"");
+		return (NULL);
+	}
+	if (srctype == PCAP_SRC_IFLOCAL) {
+		/*
+		 * If it starts with rpcap://, that refers to a local device
+		 * (no host part in the URL). Remove the rpcap://, and
+		 * fall through to the regular open path.
+		 */
+		if (strncmp(device, PCAP_SRC_IF_STRING, strlen(PCAP_SRC_IF_STRING)) == 0) {
+			size_t len = strlen(device) - strlen(PCAP_SRC_IF_STRING) + 1;
+
+			if (len > 0)
+				device += strlen(PCAP_SRC_IF_STRING);
+		}
+	}
+#endif	/* ENABLE_REMOTE */
+
+	p = pcap_create(device, errbuf);
+	if (p == NULL)
+		return (NULL);
+	status = pcap_set_snaplen(p, snaplen);
+	if (status < 0)
+		goto fail;
+	status = pcap_set_promisc(p, promisc);
+	if (status < 0)
+		goto fail;
+	status = pcap_set_timeout(p, to_ms);
+	if (status < 0)
+		goto fail;
+	/*
+	 * Mark this as opened with pcap_open_live(), so that, for
+	 * example, we show the full list of DLT_ values, rather
+	 * than just the ones that are compatible with capturing
+	 * when not in monitor mode.  That allows existing applications
+	 * to work the way they used to work, but allows new applications
+	 * that know about the new open API to, for example, find out the
+	 * DLT_ values that they can select without changing whether
+	 * the adapter is in monitor mode or not.
+	 */
+	p->oldstyle = 1;
+	status = pcap_activate(p);
+	if (status < 0)
+		goto fail;
+	return (p);
+fail:
+	if (status == PCAP_ERROR) {
+		/*
+		 * Another buffer is a bit cumbersome, but it avoids
+		 * -Wformat-truncation.
+		 */
+		char trimbuf[PCAP_ERRBUF_SIZE - 5]; /* 2 bytes shorter */
+
+		pcap_strlcpy(trimbuf, p->errbuf, sizeof(trimbuf));
+		snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %.*s", device,
+		    PCAP_ERRBUF_SIZE - 3, trimbuf);
+	} else if (status == PCAP_ERROR_NO_SUCH_DEVICE ||
+	    status == PCAP_ERROR_PERM_DENIED ||
+	    status == PCAP_ERROR_PROMISC_PERM_DENIED) {
+		/*
+		 * Only show the additional message if it's not
+		 * empty.
+		 */
+		if (p->errbuf[0] != '\0') {
+			/*
+			 * Idem.
+			 */
+			char trimbuf[PCAP_ERRBUF_SIZE - 8]; /* 2 bytes shorter */
+
+			pcap_strlcpy(trimbuf, p->errbuf, sizeof(trimbuf));
+			snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %s (%.*s)",
+			    device, pcap_statustostr(status),
+			    PCAP_ERRBUF_SIZE - 6, trimbuf);
+		} else {
+			snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %s",
+			    device, pcap_statustostr(status));
+		}
+	} else {
+		snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %s", device,
+		    pcap_statustostr(status));
+	}
+	pcap_close(p);
+	return (NULL);
+}

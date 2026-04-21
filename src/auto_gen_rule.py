@@ -14,6 +14,20 @@ gemini_api_key = os.environ.get('GEMINI_API_KEY', '')
 gemini_model = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash')
 genai.configure(api_key=gemini_api_key)
 
+# USD per 1M tokens: (input, output). Update if Gemini pricing changes.
+GEMINI_PRICING = {
+    'gemini-2.0-flash':        (0.10, 0.40),
+    'gemini-2.0-flash-lite':   (0.075, 0.30),
+    'gemini-2.5-flash':        (0.15, 0.60),
+    'gemini-2.5-flash-lite':   (0.10, 0.40),
+    'gemini-1.5-flash':        (0.075, 0.30),
+    'gemini-1.5-pro':          (1.25, 5.00),
+}
+
+def compute_cost(input_tokens, output_tokens):
+    prices = GEMINI_PRICING.get(gemini_model, (0.10, 0.40))
+    return round((input_tokens * prices[0] + output_tokens * prices[1]) / 1_000_000, 6)
+
 gpt_token_small_limit = 4000
 gpt_token_large_limit = 16000
 rule_temperature = 0
@@ -333,6 +347,8 @@ def query_gpt(prompt, message_before, temprature_in, big_flag):
     global one_query
     global gpt_answer_index
     global token_num
+    global input_token_num
+    global output_token_num
     answer_path = gpt_answer_dir + '/' + str(gpt_answer_index)
     gpt_answer_index += 1
 
@@ -360,6 +376,8 @@ def query_gpt(prompt, message_before, temprature_in, big_flag):
             chat = model.start_chat(history=history)
             response = chat.send_message(current_text)
             token = response.usage_metadata.total_token_count
+            input_token_num += response.usage_metadata.prompt_token_count
+            output_token_num += response.usage_metadata.candidates_token_count
             token_num += token
             response_text = response.text.strip('\n')
 
@@ -1131,6 +1149,8 @@ def get_new_list(response):
 def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log):
     global one_query
     global token_num
+    global input_token_num
+    global output_token_num
     # rule_out: rule prompt, output and rule-list
     rule_out = out_dir + '/rule_log'
 
@@ -1167,6 +1187,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log):
     all_out_dict['Final_Handle_Rule'] = list()
     all_out_dict['Final_Rule_Num'] = 0
     all_out_dict['All_Token'] = 0
+    all_out_dict['All_Cost_USD'] = 0.0
     all_out_dict['Errmsg'] = ''
 
     
@@ -1196,6 +1217,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log):
         all_out_dict['Errmsg'] = 'Success'
         all_out_dict['All_Token'] = token_num
         all_out_dict['All_Query_Times'] = one_query
+        all_out_dict['All_Cost_USD'] = compute_cost(input_token_num, output_token_num)
         with open(all_log, 'a') as f:
             f.write(json.dumps(all_out_dict))
             f.write('\n')
@@ -1204,6 +1226,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log):
         all_out_dict['Errmsg'] = 'Success'
         all_out_dict['All_Token'] = token_num
         all_out_dict['All_Query_Times'] = one_query
+        all_out_dict['All_Cost_USD'] = compute_cost(input_token_num, output_token_num)
         with open(all_log, 'a') as f:
             f.write(json.dumps(all_out_dict))
             f.write('\n')
@@ -1279,6 +1302,8 @@ if __name__ == '__main__':
     # parse_question_prefix = question_dir + 'parse_rule_list'
     one_query = 0
     token_num = 0
+    input_token_num = 0
+    output_token_num = 0
     token_all_big = 0
     
     callgraph_list = read_json(callgraph_path)
@@ -1316,6 +1341,8 @@ if __name__ == '__main__':
         print(f'[{api_num}/{len(api_list)}] {api}')
         one_query = 0
         token_num = 0
+        input_token_num = 0
+        output_token_num = 0
         token_all_big += token_num
         # get callgraph:
         if api not in callgraph_index.keys():
@@ -1369,8 +1396,10 @@ if __name__ == '__main__':
                         continue
 
                     
-                    one_query = 0 
+                    one_query = 0
                     token_num = 0
+                    input_token_num = 0
+                    output_token_num = 0
                     if not os.path.exists(out_dir1):
                         os.mkdir(out_dir1)
                     # continue

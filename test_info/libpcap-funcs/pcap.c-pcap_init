@@ -1,0 +1,76 @@
+int pcap_init(unsigned int opts, char *errbuf){
+	static int initialized;
+
+	/*
+	 * Don't allow multiple calls that set different modes; that
+	 * may mean a library is initializing pcap in one mode and
+	 * a program using that library, or another library used by
+	 * that program, is initializing it in another mode.
+	 */
+	switch (opts) {
+
+	case PCAP_CHAR_ENC_LOCAL:
+		/* Leave "UTF-8 mode" off. */
+		if (initialized) {
+			if (pcap_utf_8_mode) {
+				snprintf(errbuf, PCAP_ERRBUF_SIZE,
+				    "Multiple pcap_init calls with different character encodings");
+				return (PCAP_ERROR);
+			}
+		}
+		break;
+
+	case PCAP_CHAR_ENC_UTF_8:
+		/* Turn on "UTF-8 mode". */
+		if (initialized) {
+			if (!pcap_utf_8_mode) {
+				snprintf(errbuf, PCAP_ERRBUF_SIZE,
+				    "Multiple pcap_init calls with different character encodings");
+				return (PCAP_ERROR);
+			}
+		}
+		pcap_utf_8_mode = 1;
+		break;
+
+	case PCAP_MMAP_32BIT:
+		pcap_mmap_32bit = 1;
+		break;
+
+	default:
+		snprintf(errbuf, PCAP_ERRBUF_SIZE, "Unknown options specified");
+		return (PCAP_ERROR);
+	}
+
+	/*
+	 * Turn the appropriate mode on for error messages; those routines
+	 * are also used in rpcapd, which has no access to pcap's internal
+	 * UTF-8 mode flag, so we have to call a routine to set its
+	 * UTF-8 mode flag.
+	 */
+	pcap_fmt_set_encoding(opts);
+
+	if (initialized) {
+		/*
+		 * Nothing more to do; for example, on Windows, we've
+		 * already initialized Winsock.
+		 */
+		return (0);
+	}
+
+#ifdef _WIN32
+	/*
+	 * Now set up Winsock.
+	 */
+	if (internal_wsockinit(errbuf) == -1) {
+		/* Failed. */
+		return (PCAP_ERROR);
+	}
+#endif
+
+	/*
+	 * We're done.
+	 */
+	initialized = 1;
+	pcap_new_api = 1;
+	return (0);
+}

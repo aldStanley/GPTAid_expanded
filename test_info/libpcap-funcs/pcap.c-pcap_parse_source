@@ -1,0 +1,333 @@
+int pcap_parse_source(const char *source, char **schemep, char **userinfop,
+    char **hostp, char **portp, char **pathp, char *ebuf){
+	char *colonp;
+	size_t scheme_len;
+	char *scheme;
+	const char *endp;
+	size_t authority_len;
+	char *authority;
+	char *parsep, *atsignp, *bracketp;
+	char *userinfo, *host, *port, *path;
+
+	/*
+	 * Start out returning nothing.
+	 */
+	*schemep = NULL;
+	*userinfop = NULL;
+	*hostp = NULL;
+	*portp = NULL;
+	*pathp = NULL;
+
+	/*
+	 * RFC 3986 says:
+	 *
+	 *   URI         = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+	 *
+	 *   hier-part   = "//" authority path-abempty
+	 *               / path-absolute
+	 *               / path-rootless
+	 *               / path-empty
+	 *
+	 *   authority   = [ userinfo "@" ] host [ ":" port ]
+	 *
+	 *   userinfo    = *( unreserved / pct-encoded / sub-delims / ":" )
+         *
+         * Step 1: look for the ":" at the end of the scheme.
+	 * A colon in the source is *NOT* sufficient to indicate that
+	 * this is a URL, as interface names on some platforms might
+	 * include colons (e.g., I think some Solaris interfaces
+	 * might).
+	 */
+	colonp = strchr(source, ':');
+	if (colonp == NULL) {
+		/*
+		 * The source is the device to open.
+		 * Return a NULL pointer for the scheme, user information,
+		 * host, and port, and return the device as the path.
+		 */
+		*pathp = strdup(source);
+		if (*pathp == NULL) {
+			pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+			    errno, "malloc");
+			return (-1);
+		}
+		return (0);
+	}
+
+	/*
+	 * All schemes must have "//" after them, i.e. we only support
+	 * hier-part   = "//" authority path-abempty, not
+	 * hier-part   = path-absolute
+	 * hier-part   = path-rootless
+	 * hier-part   = path-empty
+	 *
+	 * We need that in order to distinguish between a local device
+	 * name that happens to contain a colon and a URI.
+	 */
+	if (strncmp(colonp + 1, "//", 2) != 0) {
+		/*
+		 * The source is the device to open.
+		 * Return a NULL pointer for the scheme, user information,
+		 * host, and port, and return the device as the path.
+		 */
+		*pathp = strdup(source);
+		if (*pathp == NULL) {
+			pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+			    errno, "malloc");
+			return (-1);
+		}
+		return (0);
+	}
+
+	/*
+	 * XXX - check whether the purported scheme could be a scheme?
+	 */
+
+	/*
+	 * OK, this looks like a URL.
+	 * Get the scheme.
+	 */
+	scheme_len = colonp - source;
+	scheme = malloc(scheme_len + 1);
+	if (scheme == NULL) {
+		pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+		    errno, "malloc");
+		return (-1);
+	}
+	memcpy(scheme, source, scheme_len);
+	scheme[scheme_len] = '\0';
+
+	/*
+	 * Treat file: specially - take everything after file:// as
+	 * the pathname.
+	 */
+	if (pcap_strcasecmp(scheme, "file") == 0) {
+		*pathp = strdup(colonp + 3);
+		if (*pathp == NULL) {
+			pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+			    errno, "malloc");
+			free(scheme);
+			return (-1);
+		}
+		*schemep = scheme;
+		return (0);
+	}
+
+	/*
+	 * The WinPcap documentation says you can specify a local
+	 * interface with "rpcap://{device}"; we special-case
+	 * that here.  If the scheme is "rpcap", and there are
+	 * no slashes past the "//", we just return the device.
+	 *
+	 * XXX - %-escaping?
+	 */
+	if ((pcap_strcasecmp(scheme, "rpcap") == 0 ||
+	    pcap_strcasecmp(scheme, "rpcaps") == 0) &&
+	    strchr(colonp + 3, '/') == NULL) {
+		/*
+		 * Local device.
+		 *
+		 * Return a NULL pointer for the scheme, user information,
+		 * host, and port, and return the device as the path.
+		 */
+		free(scheme);
+		*pathp = strdup(colonp + 3);
+		if (*pathp == NULL) {
+			pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+			    errno, "malloc");
+			return (-1);
+		}
+		return (0);
+	}
+
+	/*
+	 * OK, now start parsing the authority.
+	 * Get token, terminated with / or terminated at the end of
+	 * the string.
+	 */
+	authority_len = strcspn(colonp + 3, "/");
+	authority = get_substring(colonp + 3, authority_len, ebuf);
+	if (authority == NULL) {
+		/*
+		 * Error.
+		 */
+		free(scheme);
+		return (-1);
+	}
+	endp = colonp + 3 + authority_len;
+
+	/*
+	 * Now carve the authority field into its components.
+	 */
+	parsep = authority;
+
+	/*
+	 * Is there a userinfo field?
+	 */
+	atsignp = strchr(parsep, '@');
+	if (atsignp != NULL) {
+		/*
+		 * Yes.
+		 */
+		size_t userinfo_len;
+
+		userinfo_len = atsignp - parsep;
+		userinfo = get_substring(parsep, userinfo_len, ebuf);
+		if (userinfo == NULL) {
+			/*
+			 * Error.
+			 */
+			free(authority);
+			free(scheme);
+			return (-1);
+		}
+		parsep = atsignp + 1;
+	} else {
+		/*
+		 * No.
+		 */
+		userinfo = NULL;
+	}
+
+	/*
+	 * Is there a host field?
+	 */
+	if (*parsep == '\0') {
+		/*
+		 * No; there's no host field or port field.
+		 */
+		host = NULL;
+		port = NULL;
+	} else {
+		/*
+		 * Yes.
+		 */
+		size_t host_len;
+
+		/*
+		 * Is it an IP-literal?
+		 */
+		if (*parsep == '[') {
+			/*
+			 * Yes.
+			 * Treat verything up to the closing square
+			 * bracket as the IP-Literal; we don't worry
+			 * about whether it's a valid IPv6address or
+			 * IPvFuture (or an IPv4address, for that
+			 * matter, just in case we get handed a
+			 * URL with an IPv4 IP-Literal, of the sort
+			 * that pcap_createsrcstr() used to generate,
+			 * and that pcap_parsesrcstr(), in the original
+			 * WinPcap code, accepted).
+			 */
+			bracketp = strchr(parsep, ']');
+			if (bracketp == NULL) {
+				/*
+				 * There's no closing square bracket.
+				 */
+				snprintf(ebuf, PCAP_ERRBUF_SIZE,
+				    "IP-literal in URL doesn't end with ]");
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+			if (*(bracketp + 1) != '\0' &&
+			    *(bracketp + 1) != ':') {
+				/*
+				 * There's extra crud after the
+				 * closing square bracketn.
+				 */
+				snprintf(ebuf, PCAP_ERRBUF_SIZE,
+				    "Extra text after IP-literal in URL");
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+			host_len = (bracketp - 1) - parsep;
+			host = get_substring(parsep + 1, host_len, ebuf);
+			if (host == NULL) {
+				/*
+				 * Error.
+				 */
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+			parsep = bracketp + 1;
+		} else {
+			/*
+			 * No.
+			 * Treat everything up to a : or the end of
+			 * the string as the host.
+			 */
+			host_len = strcspn(parsep, ":");
+			host = get_substring(parsep, host_len, ebuf);
+			if (host == NULL) {
+				/*
+				 * Error.
+				 */
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+			parsep = parsep + host_len;
+		}
+
+		/*
+		 * Is there a port field?
+		 */
+		if (*parsep == ':') {
+			/*
+			 * Yes.  It's the rest of the authority field.
+			 */
+			size_t port_len;
+
+			parsep++;
+			port_len = strlen(parsep);
+			port = get_substring(parsep, port_len, ebuf);
+			if (port == NULL) {
+				/*
+				 * Error.
+				 */
+				free(host);
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+		} else {
+			/*
+			 * No.
+			 */
+			port = NULL;
+		}
+	}
+	free(authority);
+
+	/*
+	 * Everything else is the path.  Strip off the leading /.
+	 */
+	if (*endp == '\0')
+		path = strdup("");
+	else
+		path = strdup(endp + 1);
+	if (path == NULL) {
+		pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+		    errno, "malloc");
+		free(port);
+		free(host);
+		free(userinfo);
+		free(scheme);
+		return (-1);
+	}
+	*schemep = scheme;
+	*userinfop = userinfo;
+	*hostp = host;
+	*portp = port;
+	*pathp = path;
+	return (0);
+}
