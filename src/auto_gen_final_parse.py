@@ -3,6 +3,8 @@ import os
 import sys
 import time
 import subprocess
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
 import parse_wrong_diff
 import identify_error
 import tiktoken
@@ -1088,6 +1090,14 @@ def query_critic_agent(api, declaration, right_code, violation_code, proposed_ru
     with open(log_path + '-critic', 'a') as f:
         f.write('Critic Question:\n' + prompt + '\nCritic Answer:\n' + response + '\n')
 
+    header = f'Critic Agent feedback for {api}'
+    separator = '=' * (len(header) + 6)
+    print(f'\n{separator}')
+    print(f'=== {header} ===')
+    print(separator)
+    print(response)
+    print(separator + '\n')
+
     approved = 'VERDICT: APPROVE' in response
     return approved, token
 
@@ -2150,10 +2160,9 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log):
     # faild_list, right_rules, fix_times, token_wrong = generate_wrong_code(api, lib, rule_list, question_dict,wrong_code_out_prefix, wrong_code_c_prefix, right_code, declaration, compile_cmd, compile_valgrind_cmd, final_rule_out)
     # 
     else:
-        # if_cluster_flag = False
+        print(f'  (no confirmed violation code for {api} — critic agent skipped)')
         parsed_rule = list()
         cluster_list = list()
-        # diff_list = list()
         token = 0
     # 
 
@@ -2216,8 +2225,11 @@ if __name__ == '__main__':
     api_path = '../test_info/api_info/api_list'
     callgraph_path = '../test_info/api_info/call_graph'
     root_passwd = ''
-    out_dir = '../test_info/out_refinement/'
-    info_dir = '../test_info/out_wrong_code/'
+    with open('../config.json', 'r') as _f:
+        _cfg = json.load(_f)
+    result_dir = _cfg.get('result_dir', '../test_info')
+    out_dir = result_dir + '/out_refinement/'
+    info_dir = result_dir + '/out_wrong_code/'
     # END
     
     all_log = out_dir + 'auto_rule_info'
@@ -2258,6 +2270,8 @@ if __name__ == '__main__':
     input_token_num = 0
     output_token_num = 0
     token_all_big = 0
+    total_input_token_num = 0
+    total_output_token_num = 0
 
     callgraph_list = read_json(callgraph_path)
     callgraph_index = dict()
@@ -2284,9 +2298,16 @@ if __name__ == '__main__':
         question_dict['parse_final_rule2'] = f.read()
     with open(parse_final_rule_prefix_one, 'r') as f:
         question_dict['parse_final_rule2-one'] = f.read()
-    critic_prompt_prefix = question_dir + 'CriticAgent'
-    with open(critic_prompt_prefix, 'r') as f:
-        question_dict['critic'] = f.read()
+    config_path = '../config.json'
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    if config.get('critic_agent', True):
+        critic_prompt_prefix = question_dir + 'CriticAgent'
+        with open(critic_prompt_prefix, 'r') as f:
+            question_dict['critic'] = f.read()
+        print('Critic Agent: ON')
+    else:
+        print('Critic Agent: OFF')
     api_num = 0
     for api in api_list:
         # print(api)
@@ -2301,7 +2322,6 @@ if __name__ == '__main__':
         token_num = 0
         input_token_num = 0
         output_token_num = 0
-        token_all_big += token_num
         # get callgraph:
         if api not in callgraph_index.keys():
             # print(api)
@@ -2344,8 +2364,11 @@ if __name__ == '__main__':
                 if analyse_num == 1:
                     # TODO:question_dict
                     auto_gen(api, lib, path, declaration, question_dict, out_dir_api, all_log)
+                    token_all_big += token_num
+                    total_input_token_num += input_token_num
+                    total_output_token_num += output_token_num
                 else:
-                    # some fc in this api, need to analyse other func 
+                    # some fc in this api, need to analyse other func
                     # TODO
                     prompt = generate_rule_prompt()
                     parse_rule(prompt)
@@ -2380,8 +2403,11 @@ if __name__ == '__main__':
                     if analyse_num == 1:
                         # TODO:question_dict
                         auto_gen(api, lib, path, declaration, question_dict, out_dir1, all_log)
+                        token_all_big += token_num
+                        total_input_token_num += input_token_num
+                        total_output_token_num += output_token_num
                     else:
-                        # some fc in this api, need to analyse other func 
+                        # some fc in this api, need to analyse other func
                         # TODO
                         prompt = generate_rule_prompt()
                         parse_rule(prompt)
@@ -2395,6 +2421,6 @@ if __name__ == '__main__':
         os.system('rm ' + file2)
         # print('test')
         # exit(1)
-    # print('ALL token:')
-    # print(token_all_big)
+    print(f'\nALL tokens: {token_all_big}')
+    print(f'Estimated total cost: ${compute_cost(total_input_token_num, total_output_token_num):.6f}')
     rm_env()

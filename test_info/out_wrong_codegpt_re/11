@@ -1,0 +1,259 @@
+
+Question: 
+Given the following function `pcap_open_live` in library `libpcap`, Complete the following tasks.
+```
+pcap_t *
+pcap_open_live(const char *device, int snaplen, int promisc, int to_ms, char *errbuf){
+	pcap_t *p;
+	int status;
+#ifdef ENABLE_REMOTE
+	char host[PCAP_BUF_SIZE + 1];
+	char port[PCAP_BUF_SIZE + 1];
+	char name[PCAP_BUF_SIZE + 1];
+	int srctype;
+
+	/*
+	 * A null device name is equivalent to the "any" device -
+	 * which might not be supported on this platform, but
+	 * this means that you'll get a "not supported" error
+	 * rather than, say, a crash when we try to dereference
+	 * the null pointer.
+	 */
+	if (device == NULL)
+		device = "any";
+
+	/*
+	 * Retrofit - we have to make older applications compatible with
+	 * remote capture.
+	 * So we're calling pcap_open_remote() from here; this is a very
+	 * dirty hack.
+	 * Obviously, we cannot exploit all the new features; for instance,
+	 * we cannot send authentication, we cannot use a UDP data connection,
+	 * and so on.
+	 */
+	if (pcap_parsesrcstr(device, &srctype, host, port, name, errbuf))
+		return (NULL);
+
+	if (srctype == PCAP_SRC_IFREMOTE) {
+		/*
+		 * Although we already have host, port and iface, we prefer
+		 * to pass only 'device' to pcap_open_rpcap(), so that it has
+		 * to call pcap_parsesrcstr() again.
+		 * This is less optimized, but much clearer.
+		 */
+		return (pcap_open_rpcap(device, snaplen,
+		    promisc ? PCAP_OPENFLAG_PROMISCUOUS : 0, to_ms,
+		    NULL, errbuf));
+	}
+	if (srctype == PCAP_SRC_FILE) {
+		snprintf(errbuf, PCAP_ERRBUF_SIZE, "unknown URL scheme \"file\"");
+		return (NULL);
+	}
+	if (srctype == PCAP_SRC_IFLOCAL) {
+		/*
+		 * If it starts with rpcap://, that refers to a local device
+		 * (no host part in the URL). Remove the rpcap://, and
+		 * fall through to the regular open path.
+		 */
+		if (strncmp(device, PCAP_SRC_IF_STRING, strlen(PCAP_SRC_IF_STRING)) == 0) {
+			size_t len = strlen(device) - strlen(PCAP_SRC_IF_STRING) + 1;
+
+			if (len > 0)
+				device += strlen(PCAP_SRC_IF_STRING);
+		}
+	}
+#endif	/* ENABLE_REMOTE */
+
+	p = pcap_create(device, errbuf);
+	if (p == NULL)
+		return (NULL);
+	status = pcap_set_snaplen(p, snaplen);
+	if (status < 0)
+		goto fail;
+	status = pcap_set_promisc(p, promisc);
+	if (status < 0)
+		goto fail;
+	status = pcap_set_timeout(p, to_ms);
+	if (status < 0)
+		goto fail;
+	/*
+	 * Mark this as opened with pcap_open_live(), so that, for
+	 * example, we show the full list of DLT_ values, rather
+	 * than just the ones that are compatible with capturing
+	 * when not in monitor mode.  That allows existing applications
+	 * to work the way they used to work, but allows new applications
+	 * that know about the new open API to, for example, find out the
+	 * DLT_ values that they can select without changing whether
+	 * the adapter is in monitor mode or not.
+	 */
+	p->oldstyle = 1;
+	status = pcap_activate(p);
+	if (status < 0)
+		goto fail;
+	return (p);
+fail:
+	if (status == PCAP_ERROR) {
+		/*
+		 * Another buffer is a bit cumbersome, but it avoids
+		 * -Wformat-truncation.
+		 */
+		char trimbuf[PCAP_ERRBUF_SIZE - 5]; /* 2 bytes shorter */
+
+		pcap_strlcpy(trimbuf, p->errbuf, sizeof(trimbuf));
+		snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %.*s", device,
+		    PCAP_ERRBUF_SIZE - 3, trimbuf);
+	} else if (status == PCAP_ERROR_NO_SUCH_DEVICE ||
+	    status == PCAP_ERROR_PERM_DENIED ||
+	    status == PCAP_ERROR_PROMISC_PERM_DENIED) {
+		/*
+		 * Only show the additional message if it's not
+		 * empty.
+		 */
+		if (p->errbuf[0] != '\0') {
+			/*
+			 * Idem.
+			 */
+			char trimbuf[PCAP_ERRBUF_SIZE - 8]; /* 2 bytes shorter */
+
+			pcap_strlcpy(trimbuf, p->errbuf, sizeof(trimbuf));
+			snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %s (%.*s)",
+			    device, pcap_statustostr(status),
+			    PCAP_ERRBUF_SIZE - 6, trimbuf);
+		} else {
+			snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %s",
+			    device, pcap_statustostr(status));
+		}
+	} else {
+		snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %s", device,
+		    pcap_statustostr(status));
+	}
+	pcap_close(p);
+	return (NULL);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_open_live success" after calling `pcap_open_live` successfully; Output: "Calling pcap_open_live fail" after the call to `pcap_open_live` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_open_live\n")
+    ```
+    before calling `pcap_open_live`. Make sure that there are no other function calls between this output and the calling to `pcap_open_live`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+
+Answer: 
+## Task 1: Invocation Specification of `pcap_open_live`
+
+The caller needs to follow these specifications when invoking `pcap_open_live`:
+
+1.  **`device`**: A null-terminated string specifying the network device to open for capturing. If `NULL`, it defaults to the "any" device. This can also be a remote capture URL (e.g., `rpcap://host/device`).
+2.  **`snaplen`**: An integer specifying the maximum number of bytes to capture per packet. A value of 0 means to capture the full packet.
+3.  **`promisc`**: An integer flag. If non-zero, the interface is put into promiscuous mode. If zero, it's not.
+4.  **`to_ms`**: An integer specifying the read timeout in milliseconds. A value of 0 means an infinite timeout.
+5.  **`errbuf`**: A character buffer of size `PCAP_ERRBUF_SIZE` to store error messages if an error occurs. The caller must ensure this buffer is large enough.
+
+**Return Value:**
+
+*   On success, `pcap_open_live` returns a pointer to a `pcap_t` structure, which is a handle to the packet capture instance.
+*   On failure, it returns `NULL` and `errbuf` will be populated with an error message.
+
+**Error Handling:**
+
+The function can return specific error codes related to:
+*   `PCAP_ERROR`: General error.
+*   `PCAP_ERROR_NO_SUCH_DEVICE`: The specified device does not exist.
+*   `PCAP_ERROR_PERM_DENIED`: Permissions denied to open the device.
+*   `PCAP_ERROR_PROMISC_PERM_DENIED`: Permissions denied to enable promiscuous mode.
+
+The caller is responsible for checking the return value and, if it's `NULL`, examining `errbuf` for details. The caller must also eventually call `pcap_close()` on the returned `pcap_t` pointer to release resources.
+
+## Task 2: Complete Code Example
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <pcap.h>
+#include <string.h>
+
+#define MY_ERRBUF_SIZE 256
+#define SNAPLEN 1024
+#define PROMISC 1
+#define TIMEOUT_MS 1000
+
+int main() {
+    pcap_t *handle;
+    char errbuf[MY_ERRBUF_SIZE];
+    const char *device = NULL; // Use NULL to try the default device or "any"
+
+    // Task 6: Add specific output before calling pcap_open_live
+    printf("before pcap_open_live\n");
+    fflush(stdout); // Flush stdout after printing
+
+    // Task 2.1: Call pcap_open_live following its specification
+    handle = pcap_open_live(device, SNAPLEN, PROMISC, TIMEOUT_MS, errbuf);
+
+    // Task 3 & 5: Check the call status of pcap_open_live
+    if (handle == NULL) {
+        fprintf(stderr, "Calling pcap_open_live fail\n");
+        fflush(stderr); // Ensure error message is visible
+        // Task 3: Output error message to infer the cause of the error
+        fprintf(stderr, "Error details: %s\n", errbuf);
+        fflush(stderr); // Ensure error message is visible
+        return 123; // Task 3: Return specific error code
+    } else {
+        // Task 5: Output success message
+        printf("Calling pcap_open_live success\n");
+        fflush(stdout); // Flush stdout after printing
+
+        // Task 2.2 & 2.3: Non-interactive and no infinite loops.
+        // We will perform a single packet capture to demonstrate.
+        struct pcap_pkthdr *header;
+        const u_char *packet;
+        int packet_count = 0;
+        int num_packets_to_capture = 1; // Capture just one packet
+
+        // Task 7: No file read operations in this example.
+
+        printf("Capturing %d packet(s)...\n", num_packets_to_capture);
+        fflush(stdout);
+
+        int res = pcap_next_ex(handle, &header, &packet);
+        if (res == 1) {
+            printf("Packet %d captured: %u bytes\n", packet_count + 1, header->len);
+            fflush(stdout);
+            packet_count++;
+        } else if (res == 0) {
+            printf("Timeout occurred before capturing a packet.\n");
+            fflush(stdout);
+        } else if (res == -1) {
+            fprintf(stderr, "Error reading the packet: %s\n", pcap_geterr(handle));
+            fflush(stderr);
+            // Task 3: Return specific error code
+            return 123;
+        } else if (res == -2) {
+            printf("EOF reached in the capture file.\n");
+            fflush(stdout);
+        }
+
+        // Task 2.2: Ensure no infinite loops. We've captured a fixed number of packets.
+
+        // Task 3: Check status of other APIs if they can be checked.
+        // pcap_next_ex status is checked above.
+
+        // Clean up
+        pcap_close(handle);
+        printf("pcap_close called.\n");
+        fflush(stdout);
+    }
+
+    return 0;
+}
+```

@@ -3,6 +3,9 @@ import os
 import sys
 import time
 import subprocess
+import shlex
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
 import parse_wrong_diff
 import identify_error
 import tiktoken
@@ -24,9 +27,25 @@ GEMINI_PRICING = {
     'gemini-1.5-pro':          (1.25, 5.00),
 }
 
+def _filter_error_output(text):
+    """Strip gRPC/abseil info log noise that leaks into stderr from the Gemini SDK."""
+    lines = [l for l in text.splitlines()
+             if not (l.startswith('I') and 'ev_poll_posix' in l)]
+    return '\n'.join(lines)
+
 def compute_cost(input_tokens, output_tokens):
     prices = GEMINI_PRICING.get(gemini_model, (0.10, 0.40))
     return round((input_tokens * prices[0] + output_tokens * prices[1]) / 1_000_000, 6)
+
+use_docker = False
+docker_image = 'gptaid-sandbox'
+
+def _wrap_cmd(cmd):
+    """Wrap a shell command to run inside the Docker sandbox."""
+    cwd = os.path.abspath('.')
+    volume = shlex.quote(f'{cwd}:/sandbox')
+    return (f'docker run --rm -v {volume} -w /sandbox '
+            f'--network host {docker_image} sh -c {shlex.quote(cmd)}')
 
 gpt_token_small_limit = 4000
 gpt_token_large_limit = 16000
@@ -1005,7 +1024,7 @@ def generate_fix_new_prompt(prev_msg:list, answer_code, error_msg, right_wrong):
 # 3.如果未正确执行但执行成功，返回error-handling
 # return flag, output, error_stage
 def compile_run(code, api, compile_cmd, compile_valgrind_cmd, lib):
-    global root_passwd
+    global root_passwd, use_docker
     flag = False
     output = ''
     error_stage = 'compile'
@@ -1018,7 +1037,8 @@ def compile_run(code, api, compile_cmd, compile_valgrind_cmd, lib):
     code_path = './' + api + '.c'
     with open(code_path, 'w') as f:
         f.write(code)
-    return_info = subprocess.Popen(compile_cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    cmd1 = _wrap_cmd(compile_cmd) if use_docker else compile_cmd
+    return_info = subprocess.Popen(cmd1, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     try:
         out, err = return_info.communicate(timeout=300)
     except:
@@ -1034,12 +1054,12 @@ def compile_run(code, api, compile_cmd, compile_valgrind_cmd, lib):
     # 2.run:
     clear_env()
     run_cmd1 = './' + api
-    if lib == 'libpcap':
-        run_cmd1 = './' + api
+    if use_docker:
+        run_cmd = _wrap_cmd(run_cmd1)
+    elif lib == 'libpcap':
         run_cmd = 'echo %s | sudo -S %s' % (root_passwd, run_cmd1)
     else:
         run_cmd = './' + api
-    # return_info = subprocess.getstatusoutput(run_cmd)
     return_info = subprocess.Popen(run_cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     try:
         out, err = return_info.communicate(timeout=300)
@@ -1055,8 +1075,8 @@ def compile_run(code, api, compile_cmd, compile_valgrind_cmd, lib):
         return False, info_run, 'run'
 
     # 3.val compile::
-    
-    return_info = subprocess.Popen(compile_valgrind_cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    cmd3 = _wrap_cmd(compile_valgrind_cmd) if use_docker else compile_valgrind_cmd
+    return_info = subprocess.Popen(cmd3, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     try:
         out, err = return_info.communicate(timeout=300)
     except:
@@ -1073,11 +1093,13 @@ def compile_run(code, api, compile_cmd, compile_valgrind_cmd, lib):
     # 4. val run:
     val_timeout_flag = False
     clear_env()
-    if lib == 'libpcap':
-        run_cmd_val = 'valgrind --leak-check=full --quiet ./' + api + '_val'
-        run_cmd = 'echo %s | sudo -S %s' % (root_passwd, run_cmd_val)
+    val_inner = 'valgrind --leak-check=full --quiet ./' + api + '_val'
+    if use_docker:
+        run_cmd = _wrap_cmd(val_inner)
+    elif lib == 'libpcap':
+        run_cmd = 'echo %s | sudo -S %s' % (root_passwd, val_inner)
     else:
-        run_cmd = 'valgrind --leak-check=full --quiet ./' + api + '_val'
+        run_cmd = val_inner
     
     # return_info = subprocess.getstatusoutput(run_cmd)
     return_info = subprocess.Popen(run_cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -1105,12 +1127,13 @@ def compile_run(code, api, compile_cmd, compile_valgrind_cmd, lib):
     # 5. orig run
     val_timeout_flag = False
     clear_env()
-    if lib == 'libpcap':
-        run_cmd_val = './' + api + '_val'
-        run_cmd = 'echo %s | sudo -S %s' % (root_passwd, run_cmd_val)
+    orig_inner = './' + api + '_val'
+    if use_docker:
+        run_cmd = _wrap_cmd(orig_inner)
+    elif lib == 'libpcap':
+        run_cmd = 'echo %s | sudo -S %s' % (root_passwd, orig_inner)
     else:
-        run_cmd = './' + api + '_val'
-    # return_info = subprocess.getstatusoutput(run_cmd)
+        run_cmd = orig_inner
     return_info = subprocess.Popen(run_cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     try:
         out, err = return_info.communicate(timeout=300)
@@ -1636,6 +1659,7 @@ def generate_right_code(api, lib, question_dict, out_log, code):
     error_handling_code = ''
     
     error_stage = ''
+    env_tag = '[container]' if use_docker else '[local]'
     # generate right code prompt
     right_prompt = generate_rightcode_prompt(api, lib, code, question_dict['right'])
     # query gpt
@@ -1653,8 +1677,13 @@ def generate_right_code(api, lib, question_dict, out_log, code):
 
             f.write(out_content)
     else:
-        print('  Compiling and running right code...')
+        print(f'  Compiling and running right code... {env_tag}')
         flag, output, error_stage = compile_run(right_code, api, compile_cmd, compile_valgrind_cmd, lib)
+        if not flag:
+            print(f'  [FAIL] Stage: {error_stage}')
+            print('  Error output (first 20 lines):')
+            for line in _filter_error_output(output).strip().splitlines()[:20]:
+                print('    ' + line)
         if error_stage =='error-handling':
             error_handling_code = right_code
         with open(out_log, 'w') as f:
@@ -1679,10 +1708,11 @@ def generate_right_code(api, lib, question_dict, out_log, code):
     # if not right, fix + compile_run
     while not flag:
         if fix_times > fix_limit:
+            print(f'  [GIVE UP] Right code hit attempt limit ({fix_limit}). Last stage: {error_stage}')
             with open(out_log, 'a') as f:
                 out_content = 'Break right. times over 10\n'
                 f.write(out_content)
-                break
+            break
         fix_method = 'add'
         # 判断上一个错误是否还未解决，如果是，则继续session，如果不是同一个错误，重新开始一个session
         errors = identify_error.get_error_code(right_code, output, api, api + '.c')
@@ -1724,7 +1754,7 @@ def generate_right_code(api, lib, question_dict, out_log, code):
         # TODO test
         right_code, token_fix, prev_msg = auto_fix_once(output, right_code, lib, compile_cmd, fix_method, prev_msg, None)
         fix_times += 1
-        print(f'  Fixing right code (attempt {fix_times})...')
+        print(f'  Fixing right code (attempt {fix_times}) — error stage: {error_stage} {env_tag}')
         token_before_all += token_fix
         if right_code == '':
             with open(out_log, 'a') as f:
@@ -1750,17 +1780,23 @@ def generate_right_code(api, lib, question_dict, out_log, code):
         # TODO test
         else:
             flag, output, error_stage = compile_run(right_code, api, compile_cmd, compile_valgrind_cmd, lib)
+            if not flag:
+                print(f'  [FAIL] Stage: {error_stage}')
+                print('  Error output (first 20 lines):')
+                for line in output.strip().splitlines()[:20]:
+                    print('    ' + line)
             if error_stage =='error-handling':
                 error_handling_code = right_code
             with open(out_log, 'a') as f:
                 tmp_a = prev_msg[-2]['content']
                 tmp_q = prev_msg[-1]['content']
-                out_content = 'Question: \n' + tmp_a + '\nAnswer: \n' + tmp_q + '\n parse code: \n' + right_code + '\n Run result: \n' + str(flag) + '\n' + output + '\n' + error_stage + '\n' 
+                out_content = 'Question: \n' + tmp_a + '\nAnswer: \n' + tmp_q + '\n parse code: \n' + right_code + '\n Run result: \n' + str(flag) + '\n' + output + '\n' + error_stage + '\n'
                 out_content += 'token_right: ' + str(token_before_all) + '. Token_one: ' + str(token_before_one) + '\n'
                 f.write(out_content)
         # 退出循环条件：到达最大token或者 成功
         if flag or token_before_one > token_limit_one or token_before_all > token_limit_all:
             if not flag:
+                print(f'  [GIVE UP] Right code failed after {fix_times} attempt(s). Last stage: {error_stage}')
                 with open(out_log, 'a') as f:
                     out_content = 'Break right. token_right: ' + str(token_before_all) + '. Token_one: ' + str(token_before_one) + '\n'
                     f.write(out_content)
@@ -2080,6 +2116,18 @@ def if_skip(path, out_dir):
     else:
         return False
 
+def if_skip_wrong(path, out_dir):
+    """Skip wrong-code generation only if it has already been run (Wrong_Code_Token > 0)."""
+    out_dir = out_dir.strip('/').split('/')[-1]
+    if not os.path.exists(path):
+        return False
+    res_list = read_json(path)
+    for item in res_list:
+        dir = item['Output'].strip('/').split('/')[-1]
+        if dir == out_dir and item.get('Wrong_Code_Token', 0) > 0:
+            return True
+    return False
+
 
 if __name__ == '__main__':
     
@@ -2095,12 +2143,24 @@ if __name__ == '__main__':
         fix_temperature = right_temperature
     question_dir = '../prompt/'
     # CHANGE
-    root_passwd = ''
+    root_passwd = os.environ.get('ROOT_PASSWD', '')
+    config_path = '../config.json'
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    use_docker = config.get('use_docker', False)
+    docker_image = config.get('docker_image', 'gptaid-sandbox')
+    if use_docker:
+        print(f'[Docker mode] sandbox image: {docker_image}')
     api_path = '../test_info/api_info/api_list'
     callgraph_path = '../test_info/api_info/call_graph'
     
-    info_dir = '../test_info/out_gen_rule'
-    out_dir = '../test_info/out_wrong_code'
+    result_dir = config.get('result_dir', '../test_info')
+    # wrong mode reads right-code results; right mode reads Stage 1 rule results
+    if auto_flag == 'wrong':
+        info_dir = result_dir + '/out_wrong_code'
+    else:
+        info_dir = result_dir + '/out_gen_rule'
+    out_dir = result_dir + '/out_wrong_code'
     # END
     
     info_log = info_dir + '/auto_rule_info'
@@ -2143,6 +2203,8 @@ if __name__ == '__main__':
     input_token_num = 0
     output_token_num = 0
     token_all_big = 0
+    total_input_token_num = 0
+    total_output_token_num = 0
 
     callgraph_list = read_json(callgraph_path)
     callgraph_index = dict()
@@ -2181,7 +2243,6 @@ if __name__ == '__main__':
         token_num = 0
         input_token_num = 0
         output_token_num = 0
-        token_all_big += token_num
         # get callgraph:
         if api not in callgraph_index.keys():
             print(api)
@@ -2197,11 +2258,12 @@ if __name__ == '__main__':
             if len(callgraph_index[api]) == 1:
                 out_dir_api += '/'
 
-                if if_skip(all_log, out_dir_api):
+                skip_fn = if_skip_wrong if auto_flag == 'wrong' else if_skip
+                if skip_fn(all_log, out_dir_api):
                     print(api + ' already parsed')
                     continue
 
-                
+
                 if not os.path.exists(out_dir_api):
                     os.mkdir(out_dir_api)
                 # continue
@@ -2217,8 +2279,11 @@ if __name__ == '__main__':
                 if analyse_num == 1:
                     # TODO:question_dict
                     auto_gen(api, lib, path, declaration, question_dict, out_dir_api, all_log, func_list)
+                    token_all_big += token_num
+                    total_input_token_num += input_token_num
+                    total_output_token_num += output_token_num
                 else:
-                    # some fc in this api, need to analyse other func 
+                    # some fc in this api, need to analyse other func
                     # TODO
                     prompt = generate_rule_prompt()
                     parse_rule(prompt)
@@ -2232,7 +2297,8 @@ if __name__ == '__main__':
                     lib = info['lib']
                     i += 1
                     out_dir1 = out_dir_api + str(i) + '/'
-                    if if_skip(all_log, out_dir1):
+                    skip_fn = if_skip_wrong if auto_flag == 'wrong' else if_skip
+                    if skip_fn(all_log, out_dir1):
                         print(api + ' already parsed')
                         continue
                     
@@ -2252,8 +2318,11 @@ if __name__ == '__main__':
                     if analyse_num == 1:
                         # TODO:question_dict
                         auto_gen(api, lib, path, declaration, question_dict, out_dir1, all_log, func_list)
+                        token_all_big += token_num
+                        total_input_token_num += input_token_num
+                        total_output_token_num += output_token_num
                     else:
-                        # some fc in this api, need to analyse other func 
+                        # some fc in this api, need to analyse other func
                         # TODO
                         prompt = generate_rule_prompt()
                         parse_rule(prompt)
@@ -2263,6 +2332,6 @@ if __name__ == '__main__':
         os.system('rm ' + file1)
         os.system('rm ' + file2)
 
-    print('ALL token:')
-    print(token_all_big)
+    print(f'\nALL tokens: {token_all_big}')
+    print(f'Estimated total cost: ${compute_cost(total_input_token_num, total_output_token_num):.6f}')
     rm_env()

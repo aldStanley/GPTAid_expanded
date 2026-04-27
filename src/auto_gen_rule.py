@@ -3,6 +3,8 @@ import os
 import sys
 import time
 import subprocess
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
 import parse_wrong_diff
 import tiktoken
 import re
@@ -101,6 +103,9 @@ def get_code(path):
         code = f.read()
     return code
 
+_LAYER_ORDINALS = {1: 'First', 2: 'Second', 3: 'Third', 4: 'Fourth', 5: 'Fifth',
+                   6: 'Sixth', 7: 'Seventh', 8: 'Eighth', 9: 'Ninth', 10: 'Tenth'}
+
 def get_callee_code(func_name, func_info_list, max_depth=2):
     """BFS retrieval of callee source code, bounded to max_depth.
     Returns dict of {callee_name: source_code_string}.
@@ -109,6 +114,7 @@ def get_callee_code(func_name, func_info_list, max_depth=2):
     visited = set([func_name])
     result = {}
     queue = [(func_name, 0)]
+    last_announced_layer = 0
     while queue:
         current, depth = queue.pop(0)
         if depth >= max_depth:
@@ -120,6 +126,12 @@ def get_callee_code(func_name, func_info_list, max_depth=2):
             if callee in visited:
                 continue
             visited.add(callee)
+            layer = depth + 1
+            if layer > last_announced_layer:
+                last_announced_layer = layer
+                ordinal = _LAYER_ORDINALS.get(layer, f'{layer}th')
+                print(f'...Retrieving the {ordinal} layer...')
+            print(f'  {callee}')
             callee_json = get_value_from_json(func_info_list, callee, 'func')
             if callee_json and 'path' in callee_json:
                 try:
@@ -1035,6 +1047,8 @@ def gen_rule_list(api, code, prefix_first, prefix_repeat, func_info_list, out_lo
 
         # retrieve callee source code (bounded inter-procedural, depth <= retrieval_depth)
         callee_code_dict = get_callee_code(func, func_info_list, max_depth=retrieval_depth)
+        if not callee_code_dict:
+            print('  (no internal callees found)')
 
         para_index = 1
         rule_list = list()
@@ -1202,6 +1216,7 @@ def auto_gen(api, lib, func_path, declaration, question_dict, out_dir, all_log):
         f.write(func_code)
 
     rule_list, token_rule, parse_order = gen_rule_list(api, func_code, question_rule, 'notused', func_info_list, rule_out, lib_rule, retrieval_depth=retrieval_depth)
+    rule_list = rule_list[:max_rules_per_api]
     # return True
     rule_list_desc = list()
     for item in rule_list:
@@ -1269,14 +1284,14 @@ if __name__ == '__main__':
     api_path = '../test_info/api_info/api_list'
     callgraph_path = '../test_info/api_info/call_graph'
 
-    out_dir = '../test_info/out_gen_rule/'
-
     config_path = '../config.json'
     # END
 
     with open(config_path, 'r') as f:
         config = json.load(f)
     retrieval_depth = config.get('retrieval_depth', 2)
+    max_rules_per_api = config.get('max_rules_per_api', 5)
+    out_dir = config.get('result_dir', '../test_info') + '/out_gen_rule/'
     all_log = out_dir + '/auto_rule_info'
     gpt_answer_dir = out_dir + '/gpt_re/'
     in_info_list = list()
@@ -1305,6 +1320,8 @@ if __name__ == '__main__':
     input_token_num = 0
     output_token_num = 0
     token_all_big = 0
+    total_input_token_num = 0
+    total_output_token_num = 0
     
     callgraph_list = read_json(callgraph_path)
     callgraph_index = dict()
@@ -1343,7 +1360,6 @@ if __name__ == '__main__':
         token_num = 0
         input_token_num = 0
         output_token_num = 0
-        token_all_big += token_num
         # get callgraph:
         if api not in callgraph_index.keys():
             print(api)
@@ -1376,8 +1392,11 @@ if __name__ == '__main__':
                 if analyse_num == 1:
                     # TODO:question_dict
                     auto_gen(api, lib, path, declaration, question_dict, out_dir_api, all_log)
+                    token_all_big += token_num
+                    total_input_token_num += input_token_num
+                    total_output_token_num += output_token_num
                 else:
-                    # some fc in this api, need to analyse other func 
+                    # some fc in this api, need to analyse other func
                     # TODO
                     prompt = generate_rule_prompt()
                     parse_rule(prompt)
@@ -1412,8 +1431,11 @@ if __name__ == '__main__':
                     if analyse_num == 1:
                         # TODO:question_dict
                         auto_gen(api, lib, path, declaration, question_dict, out_dir1, all_log)
+                        token_all_big += token_num
+                        total_input_token_num += input_token_num
+                        total_output_token_num += output_token_num
                     else:
-                        # some fc in this api, need to analyse other func 
+                        # some fc in this api, need to analyse other func
                         # TODO
                         prompt = generate_rule_prompt()
                         parse_rule(prompt)
@@ -1425,5 +1447,5 @@ if __name__ == '__main__':
         file2 = './' + api
         os.system('rm ' + file1)
         os.system('rm ' + file2)
-    print('ALL token:')
-    print(token_all_big)
+    print(f'\nALL tokens: {token_all_big}')
+    print(f'Estimated total cost: ${compute_cost(total_input_token_num, total_output_token_num):.6f}')

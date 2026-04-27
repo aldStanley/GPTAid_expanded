@@ -35,106 +35,67 @@ Answer:
 
 
 int main() {
-    pcap_t *handle = NULL;
+    pcap_t *handle;
     char errbuf[PCAP_ERRBUF_SIZE];
-    int snapshot_len;
-    pcap_if_t *alldevs;
-    pcap_if_t *dev;
-    char *selected_dev_name = NULL;
+    const char *device = pcap_lookupdev(errbuf);
 
-    // Attempt to find all network devices
-    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
-        fprintf(stderr, "Error in pcap_findalldevs: %s\n", errbuf);
-        fflush(stdout);
-        printf("Error finding network devices.\n");
+    if (device == NULL) {
+        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
         fflush(stdout);
         return 123;
     }
-    printf("Found network devices.\n");
-    fflush(stdout);
 
-    // Try to select a suitable device. Prioritize non-loopback, then any.
-    // For a non-interactive test, we just pick the first one found that isn't loopback,
-    // or the very first if only loopback is available.
-    dev = alldevs;
-    while (dev != NULL) {
-        // Prefer non-loopback devices if possible
-        if (!(dev->flags & PCAP_IF_LOOPBACK)) {
-            selected_dev_name = dev->name;
-            break;
-        }
-        if (selected_dev_name == NULL) { // If we haven't found a non-loopback, store the first one
-            selected_dev_name = dev->name;
-        }
-        dev = dev->next;
-    }
-
-    if (selected_dev_name == NULL) {
-        fprintf(stderr, "No network devices found.\n");
-        fflush(stdout);
-        printf("No network devices available to open.\n");
-        fflush(stdout);
-        pcap_freealldevs(alldevs); // Free the list of devices
-        return 123;
-    }
-
-    printf("Selected device for capture: %s\n", selected_dev_name);
-    fflush(stdout);
-
-    // 1. Open a network device.
-    // We use the selected device name, set snapshot length to a reasonable default,
-    // promiscuous mode to 1, and a timeout.
-    handle = pcap_open_live(selected_dev_name, BUFSIZ, 1, 1000, errbuf);
+    // Open the session in promiscuous mode
+    handle = pcap_open_live(device, BUFSIZ, 1, 1000, errbuf);
     if (handle == NULL) {
-        fprintf(stderr, "Could not open device %s: %s\n", selected_dev_name, errbuf);
+        fprintf(stderr, "Couldn't open device %s: %s\n", device, errbuf);
         fflush(stdout);
-        printf("Failed to open network device.\n");
-        fflush(stdout);
-        pcap_freealldevs(alldevs); // Free the list of devices
         return 123;
     }
-    printf("pcap_open_live successful for device %s.\n", selected_dev_name);
-    fflush(stdout);
 
-    // Free the list of devices as we no longer need it
-    pcap_freealldevs(alldevs);
+    // Activate the pcap session
+    int activate_status = pcap_activate(handle);
+    if (activate_status < 0) {
+        fprintf(stderr, "Error activating the session: %s\n", pcap_geterr(handle));
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    }
 
-    // 2. Call pcap_snapshot
+    // Check if the session is actually activated before calling pcap_snapshot
+    // Although pcap_activate returns success, it's good practice to be sure
+    // pcap_snapshot itself checks this, but the explicit check helps in debugging.
+    if (!handle->activated) {
+        fprintf(stderr, "The pcap session was not activated after pcap_activate call.\n");
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    }
+
     printf("before pcap_snapshot\n");
     fflush(stdout);
 
-    // This is the critical call to pcap_snapshot
-    snapshot_len = pcap_snapshot(handle);
+    // Call the pcap_snapshot function
+    int snapshot_len = pcap_snapshot(handle);
 
-    if (snapshot_len == PCAP_ERROR_NOT_ACTIVATED) {
-        fprintf(stderr, "Error: pcap_snapshot called on a non-activated pcap handle. "
-                        "Ensure pcap_activate was successful.\n");
+    // pcap_snapshot returns the snapshot length or PCAP_ERROR_NOT_ACTIVATED if not activated.
+    // PCAP_ERROR_NOT_ACTIVATED is typically -1.
+    if (snapshot_len < 0 && snapshot_len != PCAP_ERROR_NOT_ACTIVATED) {
+        fprintf(stderr, "Calling pcap_snapshot fail: Unknown error code %d\n", snapshot_len);
         fflush(stdout);
-        printf("Calling pcap_snapshot fail\n");
+    } else if (snapshot_len == PCAP_ERROR_NOT_ACTIVATED) {
+        fprintf(stderr, "Calling pcap_snapshot fail: pcap_t not activated.\n");
         fflush(stdout);
-        pcap_close(handle);
-        return 123;
-    } else if (snapshot_len < 0) {
-        // pcap_snapshot is documented to return PCAP_ERROR_NOT_ACTIVATED or the snapshot length.
-        // Any other negative value would be an unexpected error from the library itself.
-        fprintf(stderr, "An unexpected negative value returned by pcap_snapshot: %d\n", snapshot_len);
+    }
+    else {
+        printf("Calling pcap_snapshot success\n");
         fflush(stdout);
-        printf("Calling pcap_snapshot fail\n");
+        printf("Snapshot length obtained: %d\n", snapshot_len);
         fflush(stdout);
-        pcap_close(handle);
-        return 123;
     }
 
-    // 3. If successful
-    printf("Calling pcap_snapshot success\n");
-    fflush(stdout);
-    printf("Snapshot length is: %d\n", snapshot_len);
-    fflush(stdout);
-
-    // 4. Clean up
+    // Close the session
     pcap_close(handle);
-    printf("pcap_close successful.\n");
-    fflush(stdout);
 
     return 0;
 }
@@ -144,36 +105,23 @@ int main() {
 Question: 
 Run result of the code is: 
 
-Password:Sorry, try again.
-Password:
-sudo: no password was provided
-sudo: 1 incorrect password attempt
+pcap_snapshot.c: In function 'main':
+pcap_snapshot.c:11:5: warning: 'pcap_lookupdev' is deprecated: use 'pcap_findalldevs' and use the first device [-Wdeprecated-declarations]
+   11 |     const char *device = pcap_lookupdev(errbuf);
+      |     ^~~~~
+In file included from /usr/include/pcap.h:43,
+                 from pcap_snapshot.c:5:
+/usr/include/pcap/pcap.h:394:18: note: declared here
+  394 | PCAP_API char   *pcap_lookupdev(char *)
+      |                  ^~~~~~~~~~~~~~
+pcap_snapshot.c:39:16: error: invalid use of incomplete typedef 'pcap_t' {aka 'struct pcap'}
+   39 |     if (!handle->activated) {
+      |                ^~
 Please fix this code based on the run result. Please Follow the instruction in the first session!
 Note: I am using the program automation to run the code you gave, so please generate the code directly that will run correctly
 Answer Format: ```code```
 
 Answer: 
-The provided run result "sudo: no password was provided" and "sudo: 1 incorrect password attempt" indicates an issue with the execution environment, not with the C code itself. The code, as written, does not use `sudo`. The `pcap_open_live` function requires elevated privileges to capture network traffic from most interfaces. When run in an environment that automatically executes commands, if `sudo` is implicitly or explicitly required for `pcap_open_live` to succeed (which it usually is for promiscuous mode), the automation might be failing to provide the necessary password or privilege escalation.
-
-The task explicitly states "The code needs to be non-interactive". This means the code itself shouldn't prompt for a password. The responsibility of running the code with the correct privileges (e.g., `sudo ./your_program`) lies with the execution environment.
-
-Since the code provided already correctly implements the logic for calling `pcap_snapshot` and handles potential errors according to the prompt's requirements, the "fix" needed is outside the scope of the C code.
-
-However, to address the *spirit* of the request which is to generate code that will *run correctly* in an automated environment and given the constraint that the code itself cannot be interactive, the best approach is to assume the *environment* will handle privilege escalation. The current code is already well-structured for this.
-
-**Crucially, `pcap_open_live` can fail if it doesn't have the necessary permissions.** The current code correctly checks for this failure. The error message it prints in case of `pcap_open_live` failure is:
-`fprintf(stderr, "Could not open device %s: %s\n", selected_dev_name, errbuf);`
-`printf("Failed to open network device.\n");`
-
-This is appropriate. The "error" in the execution is not in how `pcap_snapshot` is called, but in the prerequisite `pcap_open_live` failing due to permissions.
-
-Given the prompt to "fix this code based on the run result" and "generate the code directly that will run correctly", and acknowledging that the problem is privilege escalation which the code itself cannot solve without becoming interactive:
-
-1.  **No changes to `pcap_snapshot` logic are needed.** The `pcap_snapshot` function itself is called correctly *if* `pcap_open_live` succeeds.
-2.  **The issue is `pcap_open_live` failing.** The code already reports this failure.
-
-Since I cannot modify the external execution environment, and the C code itself adheres to all prior instructions, I will provide the *exact same code* but reiterate that for it to run successfully, it **must be executed with appropriate privileges** (e.g., `sudo`). The "run result" indicates an execution context issue, not a code logic error in the provided function's usage.
-
 ```code
 #include <stdio.h>
 #include <stdlib.h>
@@ -181,114 +129,75 @@ Since I cannot modify the external execution environment, and the C code itself 
 
 #include <pcap.h>
 
-
 int main() {
-    pcap_t *handle = NULL;
+    pcap_t *handle;
     char errbuf[PCAP_ERRBUF_SIZE];
-    int snapshot_len;
-    pcap_if_t *alldevs;
+    pcap_if_t *alldevsp = NULL;
     pcap_if_t *dev;
-    char *selected_dev_name = NULL;
+    const char *device = NULL;
 
-    // Attempt to find all network devices
-    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
-        fprintf(stderr, "Error in pcap_findalldevs: %s\n", errbuf);
-        fflush(stdout);
-        printf("Error finding network devices.\n");
+    // Find all available network devices
+    if (pcap_findalldevs(&alldevsp, errbuf) == -1) {
+        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
         fflush(stdout);
         return 123;
     }
-    printf("Found network devices.\n");
-    fflush(stdout);
 
-    // Try to select a suitable device. Prioritize non-loopback, then any.
-    // For a non-interactive test, we just pick the first one found that isn't loopback,
-    // or the very first if only loopback is available.
-    dev = alldevs;
-    while (dev != NULL) {
-        // Prefer non-loopback devices if possible
-        if (!(dev->flags & PCAP_IF_LOOPBACK)) {
-            selected_dev_name = dev->name;
-            break;
-        }
-        if (selected_dev_name == NULL) { // If we haven't found a non-loopback, store the first one
-            selected_dev_name = dev->name;
-        }
-        dev = dev->next;
-    }
-
-    if (selected_dev_name == NULL) {
+    // Use the first available device
+    if (alldevsp == NULL) {
         fprintf(stderr, "No network devices found.\n");
         fflush(stdout);
-        printf("No network devices available to open.\n");
-        fflush(stdout);
-        pcap_freealldevs(alldevs); // Free the list of devices
         return 123;
     }
+    device = alldevsp->name;
 
-    printf("Selected device for capture: %s\n", selected_dev_name);
-    fflush(stdout);
-
-    // 1. Open a network device.
-    // We use the selected device name, set snapshot length to a reasonable default,
-    // promiscuous mode to 1, and a timeout.
-    // NOTE: pcap_open_live requires elevated privileges (e.g., run with sudo).
-    // The failure in the previous run was likely due to insufficient privileges.
-    handle = pcap_open_live(selected_dev_name, BUFSIZ, 1, 1000, errbuf);
+    // Open the session in promiscuous mode
+    handle = pcap_open_live(device, BUFSIZ, 1, 1000, errbuf);
     if (handle == NULL) {
-        fprintf(stderr, "Could not open device %s: %s\n", selected_dev_name, errbuf);
+        fprintf(stderr, "Couldn't open device %s: %s\n", device, errbuf);
         fflush(stdout);
-        // This error message is more specific to the failure of opening the device,
-        // which is a prerequisite for pcap_snapshot.
-        printf("Failed to open network device. Ensure you have sufficient privileges (e.g., run with sudo).\n");
-        fflush(stdout);
-        pcap_freealldevs(alldevs); // Free the list of devices
+        pcap_freealldevs(alldevsp); // Free the list of devices
         return 123;
     }
-    printf("pcap_open_live successful for device %s.\n", selected_dev_name);
-    fflush(stdout);
 
-    // Free the list of devices as we no longer need it
-    pcap_freealldevs(alldevs);
+    // Activate the pcap session
+    int activate_status = pcap_activate(handle);
+    if (activate_status < 0) {
+        fprintf(stderr, "Error activating the session: %s\n", pcap_geterr(handle));
+        fflush(stdout);
+        pcap_close(handle);
+        pcap_freealldevs(alldevsp); // Free the list of devices
+        return 123;
+    }
 
-    // 2. Call pcap_snapshot
-    // The invocation specification for pcap_snapshot is that 'p' must be a valid,
-    // activated pcap_t handle. The code correctly obtains this handle via pcap_open_live.
+    // The direct access to 'activated' member of pcap_t is not public API.
+    // The pcap_snapshot function internally checks if the session is activated.
+    // So we rely on pcap_snapshot's return value to determine activation status.
+
     printf("before pcap_snapshot\n");
     fflush(stdout);
 
-    // This is the critical call to pcap_snapshot
-    snapshot_len = pcap_snapshot(handle);
+    // Call the pcap_snapshot function
+    int snapshot_len = pcap_snapshot(handle);
 
-    if (snapshot_len == PCAP_ERROR_NOT_ACTIVATED) {
-        fprintf(stderr, "Error: pcap_snapshot called on a non-activated pcap handle. "
-                        "Ensure pcap_activate was successful.\n");
+    // pcap_snapshot returns the snapshot length or PCAP_ERROR_NOT_ACTIVATED if not activated.
+    // PCAP_ERROR_NOT_ACTIVATED is typically -1.
+    if (snapshot_len < 0 && snapshot_len != PCAP_ERROR_NOT_ACTIVATED) {
+        fprintf(stderr, "Calling pcap_snapshot fail: Unknown error code %d\n", snapshot_len);
         fflush(stdout);
-        printf("Calling pcap_snapshot fail\n");
+    } else if (snapshot_len == PCAP_ERROR_NOT_ACTIVATED) {
+        fprintf(stderr, "Calling pcap_snapshot fail: pcap_t not activated.\n");
         fflush(stdout);
-        pcap_close(handle);
-        return 123;
-    } else if (snapshot_len < 0) {
-        // pcap_snapshot is documented to return PCAP_ERROR_NOT_ACTIVATED or the snapshot length.
-        // Any other negative value would be an unexpected error from the library itself.
-        fprintf(stderr, "An unexpected negative value returned by pcap_snapshot: %d\n", snapshot_len);
+    } else {
+        printf("Calling pcap_snapshot success\n");
         fflush(stdout);
-        printf("Calling pcap_snapshot fail\n");
+        printf("Snapshot length obtained: %d\n", snapshot_len);
         fflush(stdout);
-        pcap_close(handle);
-        return 123;
     }
 
-    // 3. If successful
-    printf("Calling pcap_snapshot success\n");
-    fflush(stdout);
-    printf("Snapshot length is: %d\n", snapshot_len);
-    fflush(stdout);
-
-    // 4. Clean up
+    // Close the session
     pcap_close(handle);
-    printf("pcap_close successful.\n");
-    fflush(stdout);
+    pcap_freealldevs(alldevsp); // Free the list of devices
 
     return 0;
 }

@@ -4,9 +4,14 @@ import os
 from cinspector.interfaces import CCode
 from cinspector.analysis import CallGraph
 from cinspector.nodes import CompoundStatementNode, DeclarationNode, IfStatementNode,Edit, AssignmentExpressionNode, IdentifierNode, InitDeclaratorNode, ParenthesizedExpressionNode, FunctionDefinitionNode
+from cinspector.nodes.basic_node import BasicNode
 import difflib
 import re
 import copy
+
+# cinspector renamed children_by_type_name → descendants_by_type_name; restore it on the base class
+if not hasattr(BasicNode, 'children_by_type_name'):
+    BasicNode.children_by_type_name = lambda self, t: [c for c in self.children if c.ts_type == t]
 
 blob_code2 = '''
 #include <stdio.h>
@@ -558,7 +563,10 @@ def del_comment(cc1: CCode, code1: str):
 
 def get_tree(cc: CCode):
     # # print(cc)
-    funcs = cc.get_by_type_name_and_query('function_definition', {'identifier': 'main'})
+    try:
+        funcs = cc.get_by_type_name_and_query('function_definition', {'identifier': 'main'})
+    except (AssertionError, AttributeError, Exception):
+        return [], []
     funcs_other = cc.get_by_type_name('function_definition')
     if len(funcs) == 0:
         return [], []
@@ -578,7 +586,10 @@ def get_tree(cc: CCode):
         if func.name.src == 'main':
             continue
         children_list.extend(func.body.children)
-        declaration = func.children_by_type_name('function_declarator')[0]
+        declarators = func.children_by_type_name('function_declarator')
+        if not declarators:
+            continue
+        declaration = declarators[0]
         children_list.append(declaration)
         type_list.append(type(declaration))
         # # print(func.body.children)
@@ -1667,7 +1678,10 @@ def if_add_definition(code2, api_name):
         i += 1
         # print(str(i))
         # print(func)
-    func = cc.get_by_type_name_and_query('function_definition', {'identifier': api_name})
+    try:
+        func = cc.get_by_type_name_and_query('function_definition', {'identifier': api_name})
+    except (AssertionError, Exception):
+        return False
     if len(func) != 0:
         return True
     else:
