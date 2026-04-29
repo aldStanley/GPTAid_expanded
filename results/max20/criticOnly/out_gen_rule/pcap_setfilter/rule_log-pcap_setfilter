@@ -1,0 +1,377 @@
+SAVED_Question: 
+source code of `pcap_setfilter`:
+```
+int pcap_setfilter(pcap_t *p, struct bpf_program *fp){
+	return (p->setfilter_op(p, fp));
+}
+
+```
+
+Please analyze the source code of the API `pcap_setfilter` and all the information provided before it. Then, respond with the following tasks:
+
+Task 1: Based on the analysis of the source code, provide a concise description of the functionality of the function.
+
+Task 2: Locate the code related to the Parameter 1 `p`.
+
+Task 3: Identify the security rules that should be observed for the Parameter 1 to prevent misuse of the API `pcap_setfilter`. For each rule, include code snippets that demonstrate a violation of the rule:
+
+1. Please provide detailed and specific descriptions for each rule. Clearly indicate which specific operations relate to the Parameter 1. If a rule can apply to multiple operations that breach the rule, please make it more specific.
+
+2. Each rule should focus on describing only one behavior if possible. If a rule encompasses multiple behaviors, please break it down into distinct rules.
+
+3. Each rule should correspond to a separate violation code.
+
+4. In cases where you're unsure about certain code details, you can suggest all possible rules, whether accurate or not, based on your knowledge database about potential API misuse.
+
+5. Each violation code should contain at least one call to `pcap_setfilter`
+
+6. Follow this format for each rule: Begin with an Arabic numeral, then describe the rule content (e.g., "1. Rule description"). Provide a corresponding violation code enclosed in triple backticks like this:
+```
+//Violation Code
+```
+Format Example For Each Rule:
+(Note: These examples are provided only for reference and should not influence the format of the responses.)
+1. Rule:
+Violation Code:
+```
+//Violation Code
+```
+1. Rule:
+Violation Code:
+```
+//Violation Code
+```
+
+
+SAVED_Answer:
+The provided source code for `pcap_setfilter` is extremely minimal, indicating that the actual implementation of setting the filter is delegated to an internal operation within the `pcap_t` structure.
+
+## Analysis of `pcap_setfilter`
+
+**Functionality:**
+
+The `pcap_setfilter` function is responsible for applying a compiled filter program to a live or offline packet capture handle. It takes a `pcap_t` handle (representing the capture device or file) and a `struct bpf_program` (the compiled filter) as input. The function then invokes an internal operation (`setfilter_op`) associated with the `pcap_t` handle to perform the actual filter application.
+
+## Task 1: Concise Description of Functionality
+
+`pcap_setfilter` applies a compiled Berkeley Packet Filter (BPF) program to a packet capture handle, allowing for selective capture or analysis of network traffic.
+
+## Task 2: Code Related to Parameter 1 `p`
+
+The source code for `pcap_setfilter` directly uses `p` in the following line:
+
+```c
+return (p->setfilter_op(p, fp));
+```
+
+Here, `p` is a pointer to a `pcap_t` structure. The code accesses a member of this structure named `setfilter_op`, which is expected to be a function pointer. This function pointer is then called with `p` itself and the `fp` (filter program) as arguments. This implies that the `pcap_t` structure contains the necessary context and the specific operation to set the filter for that particular capture handle.
+
+## Task 3: Security Rules for Parameter 1 `p`
+
+The primary security concern with `pcap_setfilter` revolves around the integrity and validity of the `pcap_t` handle (`p`). If `p` is not a valid, initialized, and properly managed `pcap_t` structure, it can lead to crashes, memory corruption, or unintended behavior.
+
+Here are the security rules and corresponding violation codes:
+
+1.  **Rule: The `pcap_t` handle (`p`) must be a valid and initialized capture descriptor obtained from a successful `pcap_open_live` or `pcap_open_offline` call.**
+    *   **Description:** Passing a `NULL` pointer or a pointer to an uninitialized or deallocated `pcap_t` structure to `pcap_setfilter` will result in undefined behavior, likely a segmentation fault or crash. The `pcap_t` structure holds the internal state and operational pointers necessary for packet capture and filtering.
+    *   **Violation Code:**
+        ```c
+        // Violation: Passing a NULL pcap_t handle
+        pcap_t *invalid_p = NULL;
+        struct bpf_program fp;
+        // Assume fp is properly compiled for demonstration
+        pcap_setfilter(invalid_p, &fp);
+        ```
+
+2.  **Rule: The `pcap_t` handle (`p`) must not be used after it has been closed by `pcap_close`.**
+    *   **Description:** Once `pcap_close` is called on a `pcap_t` handle, the underlying resources are released, and the structure is no longer valid. Attempting to call `pcap_setfilter` with such a handle will lead to a use-after-free vulnerability, potentially causing a crash or memory corruption.
+    *   **Violation Code:**
+        ```c
+        // Violation: Using a pcap_t handle after closing it
+        pcap_t *p = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);
+        if (p == NULL) {
+            // Handle error
+            return 1;
+        }
+        struct bpf_program fp;
+        // Assume fp is properly compiled for demonstration
+        pcap_setfilter(p, &fp); // First valid call
+
+        pcap_close(p); // Close the handle
+
+        // Attempt to set filter again on a closed handle
+        pcap_setfilter(p, &fp);
+        ```
+
+3.  **Rule: The `pcap_t` handle (`p`) must be specific to the current process and not shared or manipulated by other unrelated processes or threads without proper synchronization mechanisms.**
+    *   **Description:** While the provided `pcap_setfilter` code snippet doesn't explicitly show thread-safety mechanisms, `pcap_t` structures are generally not designed for concurrent access from multiple threads or processes without external synchronization. If multiple threads or processes attempt to modify the filter of the same `pcap_t` handle concurrently, it can lead to race conditions, data corruption, and unpredictable filtering behavior. The `p->setfilter_op` might not be atomic.
+    *   **Violation Code:**
+        ```c
+        // Violation: Concurrent modification of pcap_t filter from multiple threads
+        // This is a conceptual violation as actual multi-threaded code is complex.
+        // Assume 'p' is a shared pcap_t handle accessible by multiple threads.
+
+        // Thread 1:
+        pcap_t *shared_p = get_shared_pcap_handle(); // Assume this returns a valid handle
+        struct bpf_program fp1;
+        // Assume fp1 is compiled
+        pcap_setfilter(shared_p, &fp1);
+
+        // Thread 2 (executing concurrently):
+        struct bpf_program fp2;
+        // Assume fp2 is compiled
+        pcap_setfilter(shared_p, &fp2); // Potential race condition
+        ```
+
+4.  **Rule: The `pcap_t` handle (`p`) should not be directly modified or its internal members (like `setfilter_op`) be overwritten by external code.**
+    *   **Description:** The `pcap_t` structure is an opaque data type managed by the libpcap library. Directly accessing and modifying its members, especially function pointers like `setfilter_op`, bypasses the library's internal logic and can lead to severe instability, crashes, or security vulnerabilities. The `pcap_setfilter` function is designed to be the *only* way to set the filter.
+    *   **Violation Code:**
+        ```c
+        // Violation: Directly overwriting the setfilter_op function pointer
+        pcap_t *p = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);
+        if (p == NULL) {
+            // Handle error
+            return 1;
+        }
+
+        // Define a malicious function to overwrite the original operation
+        int malicious_setfilter(pcap_t *p_mal, struct bpf_program *fp_mal) {
+            fprintf(stderr, "Malicious filter operation executed!\n");
+            // Potentially do something harmful or bypass filtering
+            return 0; // Indicate success to avoid immediate crash
+        }
+
+        // Directly overwrite the function pointer (highly unsafe)
+        // This assumes knowledge of the internal structure of pcap_t, which is not public API.
+        // In a real scenario, this would likely involve memory corruption or exploiting a vulnerability.
+        // For demonstration, we'll simulate the effect.
+        // p->setfilter_op = malicious_setfilter; // This line would be the actual violation if possible
+
+        struct bpf_program fp;
+        // Assume fp is properly compiled for demonstration
+        // Calling pcap_setfilter would now execute the malicious function
+        pcap_setfilter(p, &fp);
+
+        pcap_close(p);
+        ```
+[{'rule': '**Rule: The `pcap_t` handle (`p`) must be a valid and initialized capture descriptor obtained from a successful `pcap_open_live` or `pcap_open_offline` call.**', 'code': '// Violation: Passing a NULL pcap_t handle\npcap_t *invalid_p = NULL;\nstruct bpf_program fp;\n// Assume fp is properly compiled for demonstration\npcap_setfilter(invalid_p, &fp);'}, {'rule': '**Rule: The `pcap_t` handle (`p`) must not be used after it has been closed by `pcap_close`.**', 'code': '// Violation: Using a pcap_t handle after closing it\npcap_t *p = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);\nif (p == NULL) {\n// Handle error\nreturn 1;\n}\nstruct bpf_program fp;\n// Assume fp is properly compiled for demonstration\npcap_setfilter(p, &fp); // First valid call\npcap_close(p); // Close the handle\n// Attempt to set filter again on a closed handle\npcap_setfilter(p, &fp);'}, {'rule': '**Rule: The `pcap_t` handle (`p`) must be specific to the current process and not shared or manipulated by other unrelated processes or threads without proper synchronization mechanisms.**', 'code': "// Violation: Concurrent modification of pcap_t filter from multiple threads\n// This is a conceptual violation as actual multi-threaded code is complex.\n// Assume 'p' is a shared pcap_t handle accessible by multiple threads.\n// Thread 1\npcap_t *shared_p = get_shared_pcap_handle(); // Assume this returns a valid handle\nstruct bpf_program fp1;\n// Assume fp1 is compiled\npcap_setfilter(shared_p, &fp1);\n// Thread 2 (executing concurrently)\nstruct bpf_program fp2;\n// Assume fp2 is compiled\npcap_setfilter(shared_p, &fp2); // Potential race condition"}, {'rule': '**Rule: The `pcap_t` handle (`p`) should not be directly modified or its internal members (like `setfilter_op`) be overwritten by external code.**', 'code': '// Violation: Directly overwriting the setfilter_op function pointer\npcap_t *p = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);\nif (p == NULL) {\n// Handle error\nreturn 1;\n}\n// Define a malicious function to overwrite the original operation\nint malicious_setfilter(pcap_t *p_mal, struct bpf_program *fp_mal) {\nfprintf(stderr, "Malicious filter operation executed!\\n");\n// Potentially do something harmful or bypass filtering\nreturn 0; // Indicate success to avoid immediate crash\n}\n// Directly overwrite the function pointer (highly unsafe)\n// This assumes knowledge of the internal structure of pcap_t, which is not public API.\n// In a real scenario, this would likely involve memory corruption or exploiting a vulnerability.\n// For demonstration, we\'ll simulate the effect.\n// p->setfilter_op = malicious_setfilter; // This line would be the actual violation if possible\nstruct bpf_program fp;\n// Assume fp is properly compiled for demonstration\n// Calling pcap_setfilter would now execute the malicious function\npcap_setfilter(p, &fp);\npcap_close(p);'}]
+after parse dict:
+[{'rule': 'Parameter 1: **Rule: The `pcap_t` handle (`p`) must be a valid and initialized capture descriptor obtained from a successful `pcap_open_live` or `pcap_open_offline` call.**', 'code': '// Violation: Passing a NULL pcap_t handle\npcap_t *invalid_p = NULL;\nstruct bpf_program fp;\n// Assume fp is properly compiled for demonstration\npcap_setfilter(invalid_p, &fp);'}, {'rule': 'Parameter 1: **Rule: The `pcap_t` handle (`p`) must not be used after it has been closed by `pcap_close`.**', 'code': '// Violation: Using a pcap_t handle after closing it\npcap_t *p = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);\nif (p == NULL) {\n// Handle error\nreturn 1;\n}\nstruct bpf_program fp;\n// Assume fp is properly compiled for demonstration\npcap_setfilter(p, &fp); // First valid call\npcap_close(p); // Close the handle\n// Attempt to set filter again on a closed handle\npcap_setfilter(p, &fp);'}, {'rule': 'Parameter 1: **Rule: The `pcap_t` handle (`p`) must be specific to the current process and not shared or manipulated by other unrelated processes or threads without proper synchronization mechanisms.**', 'code': "// Violation: Concurrent modification of pcap_t filter from multiple threads\n// This is a conceptual violation as actual multi-threaded code is complex.\n// Assume 'p' is a shared pcap_t handle accessible by multiple threads.\n// Thread 1\npcap_t *shared_p = get_shared_pcap_handle(); // Assume this returns a valid handle\nstruct bpf_program fp1;\n// Assume fp1 is compiled\npcap_setfilter(shared_p, &fp1);\n// Thread 2 (executing concurrently)\nstruct bpf_program fp2;\n// Assume fp2 is compiled\npcap_setfilter(shared_p, &fp2); // Potential race condition"}, {'rule': 'Parameter 1: **Rule: The `pcap_t` handle (`p`) should not be directly modified or its internal members (like `setfilter_op`) be overwritten by external code.**', 'code': '// Violation: Directly overwriting the setfilter_op function pointer\npcap_t *p = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);\nif (p == NULL) {\n// Handle error\nreturn 1;\n}\n// Define a malicious function to overwrite the original operation\nint malicious_setfilter(pcap_t *p_mal, struct bpf_program *fp_mal) {\nfprintf(stderr, "Malicious filter operation executed!\\n");\n// Potentially do something harmful or bypass filtering\nreturn 0; // Indicate success to avoid immediate crash\n}\n// Directly overwrite the function pointer (highly unsafe)\n// This assumes knowledge of the internal structure of pcap_t, which is not public API.\n// In a real scenario, this would likely involve memory corruption or exploiting a vulnerability.\n// For demonstration, we\'ll simulate the effect.\n// p->setfilter_op = malicious_setfilter; // This line would be the actual violation if possible\nstruct bpf_program fp;\n// Assume fp is properly compiled for demonstration\n// Calling pcap_setfilter would now execute the malicious function\npcap_setfilter(p, &fp);\npcap_close(p);'}]
+SAVED_Question: 
+source code of `pcap_setfilter`:
+```
+int pcap_setfilter(pcap_t *p, struct bpf_program *fp){
+	return (p->setfilter_op(p, fp));
+}
+
+```
+
+Please analyze the source code of the API `pcap_setfilter` and all the information provided before it. Then, respond with the following tasks:
+
+Task 1: Based on the analysis of the source code, provide a concise description of the functionality of the function.
+
+Task 2: Locate the code related to the Parameter 2 `fp`.
+
+Task 3: Identify the security rules that should be observed for the Parameter 2 to prevent misuse of the API `pcap_setfilter`. For each rule, include code snippets that demonstrate a violation of the rule:
+
+1. Please provide detailed and specific descriptions for each rule. Clearly indicate which specific operations relate to the Parameter 2. If a rule can apply to multiple operations that breach the rule, please make it more specific.
+
+2. Each rule should focus on describing only one behavior if possible. If a rule encompasses multiple behaviors, please break it down into distinct rules.
+
+3. Each rule should correspond to a separate violation code.
+
+4. In cases where you're unsure about certain code details, you can suggest all possible rules, whether accurate or not, based on your knowledge database about potential API misuse.
+
+5. Each violation code should contain at least one call to `pcap_setfilter`
+
+6. Follow this format for each rule: Begin with an Arabic numeral, then describe the rule content (e.g., "1. Rule description"). Provide a corresponding violation code enclosed in triple backticks like this:
+```
+//Violation Code
+```
+Format Example For Each Rule:
+(Note: These examples are provided only for reference and should not influence the format of the responses.)
+1. Rule:
+Violation Code:
+```
+//Violation Code
+```
+1. Rule:
+Violation Code:
+```
+//Violation Code
+```
+
+
+SAVED_Answer:
+The provided source code for `pcap_setfilter` is extremely minimal. It acts as a simple wrapper function. The actual implementation of setting the filter is delegated to an operation pointer within the `pcap_t` structure.
+
+**Task 1: Concise description of the functionality of the function.**
+
+The `pcap_setfilter` function is responsible for applying a compiled packet filter to a live or offline capture handle. It takes a `pcap_t` handle and a `struct bpf_program` (representing the compiled filter) as input and delegates the actual filter application to an internal operation defined within the `pcap_t` structure.
+
+**Task 2: Locate the code related to the Parameter 2 `fp`.**
+
+The code related to Parameter 2, `fp`, is directly used in the function call:
+
+```c
+return (p->setfilter_op(p, fp));
+```
+
+Here, `fp` is passed as the second argument to the `setfilter_op` function pointer, which is a member of the `pcap_t` structure pointed to by `p`.
+
+**Task 3: Identify the security rules that should be observed for the Parameter 2 to prevent misuse of the API `pcap_setfilter`.**
+
+The primary security concern with `pcap_setfilter` revolves around the integrity and validity of the `struct bpf_program` (`fp`) being passed. If an attacker can control the contents of `fp` or pass a malformed `fp`, they could potentially:
+
+*   **Cause denial of service:** By providing an invalid or overly complex filter that consumes excessive resources or crashes the packet capture process.
+*   **Bypass intended filtering:** If the filter is not correctly compiled or validated, it might not filter packets as expected, potentially exposing sensitive data.
+*   **Execute arbitrary code (less likely but possible in complex scenarios):** While BPF is designed to be a safe, sandboxed language, extremely complex or malformed programs could theoretically lead to vulnerabilities in the BPF interpreter itself.
+
+Here are the security rules and corresponding violation codes:
+
+1.  **Rule: The `struct bpf_program` (`fp`) must be a valid, successfully compiled BPF program. Passing a NULL pointer or an uninitialized `bpf_program` structure can lead to crashes or undefined behavior.**
+    This rule specifically addresses the state of the `fp` parameter. A `NULL` pointer for `fp` is a direct violation. Additionally, if `fp` points to a `bpf_program` that was not successfully compiled (e.g., due to syntax errors in the filter string), it can also be considered invalid and lead to security issues. The `pcap_compile` function is typically used to create a `bpf_program`, and its return value should be checked.
+
+    Violation Code:
+    ```c
+    // Violation: Passing a NULL pointer for the filter program.
+    pcap_t *handle = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "couldn't open device %s: %s\n", "eth0", errbuf);
+        return 2;
+    }
+    struct bpf_program *fp = NULL; // Intentionally NULL
+    if (pcap_setfilter(handle, fp) == -1) {
+        fprintf(stderr, "Couldn't install filter: %s\n", pcap_geterr(handle));
+        pcap_close(handle);
+        return 1;
+    }
+    pcap_close(handle);
+    ```
+
+2.  **Rule: Ensure that the `struct bpf_program` (`fp`) has been properly initialized and compiled using `pcap_compile` or a similar mechanism before being passed to `pcap_setfilter`. Passing an uninitialized or partially initialized `bpf_program` can lead to memory corruption or crashes.**
+    This rule focuses on the lifecycle of the `fp` parameter. It's not enough for `fp` to be non-NULL; it must represent a valid, compiled filter. If `fp` is allocated but not properly populated by a compilation function, it's a violation.
+
+    Violation Code:
+    ```c
+    // Violation: Passing an uninitialized bpf_program structure.
+    pcap_t *handle = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "couldn't open device %s: %s\n", "eth0", errbuf);
+        return 2;
+    }
+    struct bpf_program fp; // Declared but not compiled
+    // Missing call to pcap_compile(&fp, ...)
+    if (pcap_setfilter(handle, &fp) == -1) {
+        fprintf(stderr, "Couldn't install filter: %s\n", pcap_geterr(handle));
+        pcap_close(handle);
+        return 1;
+    }
+    pcap_close(handle);
+    ```
+
+3.  **Rule: The compiled BPF program (`fp`) should not be excessively complex or contain malicious constructs that could exploit vulnerabilities in the BPF interpreter or lead to denial of service. While `pcap_compile` performs some validation, overly crafted filter strings can still pose risks.**
+    This rule addresses the *content* of the compiled filter. While the provided `pcap_setfilter` source doesn't directly show validation of the filter's complexity or maliciousness, the underlying `setfilter_op` implementation is responsible for this. An attacker could craft a filter string that, when compiled, results in a BPF program that is extremely inefficient, consumes excessive memory, or triggers a bug in the BPF interpreter. This is a more advanced attack vector.
+
+    Violation Code:
+    ```c
+    // Violation: Passing a potentially malicious or overly complex filter program.
+    // This example uses a hypothetical complex filter string that might be crafted to cause issues.
+    // In a real scenario, this would involve deep analysis of BPF interpreter vulnerabilities.
+    pcap_t *handle = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "couldn't open device %s: %s\n", "eth0", errbuf);
+        return 2;
+    }
+    struct bpf_program fp;
+    // Hypothetical complex/malicious filter string
+    char *filter_exp = "tcp and port 80 and (((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((
+[{'rule': '**Rule: The `struct bpf_program` (`fp`) must be a valid, successfully compiled BPF program. Passing a NULL pointer or an uninitialized `bpf_program` structure can lead to crashes or undefined behavior.**', 'code': '// Violation: Passing a NULL pointer for the filter program.\npcap_t *handle = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);\nif (handle == NULL) {\nfprintf(stderr, "couldn\'t open device %s: %s\\n", "eth0", errbuf);\nreturn 2;\n}\nstruct bpf_program *fp = NULL; // Intentionally NULL\nif (pcap_setfilter(handle, fp) == -1) {\nfprintf(stderr, "Couldn\'t install filter: %s\\n", pcap_geterr(handle));\npcap_close(handle);\nreturn 1;\n}\npcap_close(handle);'}, {'rule': '**Rule: Ensure that the `struct bpf_program` (`fp`) has been properly initialized and compiled using `pcap_compile` or a similar mechanism before being passed to `pcap_setfilter`. Passing an uninitialized or partially initialized `bpf_program` can lead to memory corruption or crashes.**', 'code': '// Violation: Passing an uninitialized bpf_program structure.\npcap_t *handle = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);\nif (handle == NULL) {\nfprintf(stderr, "couldn\'t open device %s: %s\\n", "eth0", errbuf);\nreturn 2;\n}\nstruct bpf_program fp; // Declared but not compiled\n// Missing call to pcap_compile(&fp, ...)\nif (pcap_setfilter(handle, &fp) == -1) {\nfprintf(stderr, "Couldn\'t install filter: %s\\n", pcap_geterr(handle));\npcap_close(handle);\nreturn 1;\n}\npcap_close(handle);'}, {'rule': '**Rule: The compiled BPF program (`fp`) should not be excessively complex or contain malicious constructs that could exploit vulnerabilities in the BPF interpreter or lead to denial of service. While `pcap_compile` performs some validation, overly crafted filter strings can still pose risks.**', 'code': '// Violation: Passing a potentially malicious or overly complex filter program.\n// This example uses a hypothetical complex filter string that might be crafted to cause issues.\n// In a real scenario, this would involve deep analysis of BPF interpreter vulnerabilities.\npcap_t *handle = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);\nif (handle == NULL) {\nfprintf(stderr, "couldn\'t open device %s: %s\\n", "eth0", errbuf);\nreturn 2;\n}\nstruct bpf_program fp;\n// Hypothetical complex/malicious filter string\nchar *filter_exp = "tcp and port 80 and ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((('}]
+after parse dict:
+[{'rule': 'Parameter 2: **Rule: The `struct bpf_program` (`fp`) must be a valid, successfully compiled BPF program. Passing a NULL pointer or an uninitialized `bpf_program` structure can lead to crashes or undefined behavior.**', 'code': '// Violation: Passing a NULL pointer for the filter program.\npcap_t *handle = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);\nif (handle == NULL) {\nfprintf(stderr, "couldn\'t open device %s: %s\\n", "eth0", errbuf);\nreturn 2;\n}\nstruct bpf_program *fp = NULL; // Intentionally NULL\nif (pcap_setfilter(handle, fp) == -1) {\nfprintf(stderr, "Couldn\'t install filter: %s\\n", pcap_geterr(handle));\npcap_close(handle);\nreturn 1;\n}\npcap_close(handle);'}, {'rule': 'Parameter 2: **Rule: Ensure that the `struct bpf_program` (`fp`) has been properly initialized and compiled using `pcap_compile` or a similar mechanism before being passed to `pcap_setfilter`. Passing an uninitialized or partially initialized `bpf_program` can lead to memory corruption or crashes.**', 'code': '// Violation: Passing an uninitialized bpf_program structure.\npcap_t *handle = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);\nif (handle == NULL) {\nfprintf(stderr, "couldn\'t open device %s: %s\\n", "eth0", errbuf);\nreturn 2;\n}\nstruct bpf_program fp; // Declared but not compiled\n// Missing call to pcap_compile(&fp, ...)\nif (pcap_setfilter(handle, &fp) == -1) {\nfprintf(stderr, "Couldn\'t install filter: %s\\n", pcap_geterr(handle));\npcap_close(handle);\nreturn 1;\n}\npcap_close(handle);'}]
+Final Rules: 
+Parameter 1: **Rule: The `pcap_t` handle (`p`) must be a valid and initialized capture descriptor obtained from a successful `pcap_open_live` or `pcap_open_offline` call.**
+// Violation: Passing a NULL pcap_t handle
+pcap_t *invalid_p = NULL;
+struct bpf_program fp;
+// Assume fp is properly compiled for demonstration
+pcap_setfilter(invalid_p, &fp);
+Parameter 1: **Rule: The `pcap_t` handle (`p`) must not be used after it has been closed by `pcap_close`.**
+// Violation: Using a pcap_t handle after closing it
+pcap_t *p = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);
+if (p == NULL) {
+// Handle error
+return 1;
+}
+struct bpf_program fp;
+// Assume fp is properly compiled for demonstration
+pcap_setfilter(p, &fp); // First valid call
+pcap_close(p); // Close the handle
+// Attempt to set filter again on a closed handle
+pcap_setfilter(p, &fp);
+Parameter 1: **Rule: The `pcap_t` handle (`p`) must be specific to the current process and not shared or manipulated by other unrelated processes or threads without proper synchronization mechanisms.**
+// Violation: Concurrent modification of pcap_t filter from multiple threads
+// This is a conceptual violation as actual multi-threaded code is complex.
+// Assume 'p' is a shared pcap_t handle accessible by multiple threads.
+// Thread 1
+pcap_t *shared_p = get_shared_pcap_handle(); // Assume this returns a valid handle
+struct bpf_program fp1;
+// Assume fp1 is compiled
+pcap_setfilter(shared_p, &fp1);
+// Thread 2 (executing concurrently)
+struct bpf_program fp2;
+// Assume fp2 is compiled
+pcap_setfilter(shared_p, &fp2); // Potential race condition
+Parameter 1: **Rule: The `pcap_t` handle (`p`) should not be directly modified or its internal members (like `setfilter_op`) be overwritten by external code.**
+// Violation: Directly overwriting the setfilter_op function pointer
+pcap_t *p = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);
+if (p == NULL) {
+// Handle error
+return 1;
+}
+// Define a malicious function to overwrite the original operation
+int malicious_setfilter(pcap_t *p_mal, struct bpf_program *fp_mal) {
+fprintf(stderr, "Malicious filter operation executed!\n");
+// Potentially do something harmful or bypass filtering
+return 0; // Indicate success to avoid immediate crash
+}
+// Directly overwrite the function pointer (highly unsafe)
+// This assumes knowledge of the internal structure of pcap_t, which is not public API.
+// In a real scenario, this would likely involve memory corruption or exploiting a vulnerability.
+// For demonstration, we'll simulate the effect.
+// p->setfilter_op = malicious_setfilter; // This line would be the actual violation if possible
+struct bpf_program fp;
+// Assume fp is properly compiled for demonstration
+// Calling pcap_setfilter would now execute the malicious function
+pcap_setfilter(p, &fp);
+pcap_close(p);
+Parameter 2: **Rule: The `struct bpf_program` (`fp`) must be a valid, successfully compiled BPF program. Passing a NULL pointer or an uninitialized `bpf_program` structure can lead to crashes or undefined behavior.**
+// Violation: Passing a NULL pointer for the filter program.
+pcap_t *handle = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);
+if (handle == NULL) {
+fprintf(stderr, "couldn't open device %s: %s\n", "eth0", errbuf);
+return 2;
+}
+struct bpf_program *fp = NULL; // Intentionally NULL
+if (pcap_setfilter(handle, fp) == -1) {
+fprintf(stderr, "Couldn't install filter: %s\n", pcap_geterr(handle));
+pcap_close(handle);
+return 1;
+}
+pcap_close(handle);
+Parameter 2: **Rule: Ensure that the `struct bpf_program` (`fp`) has been properly initialized and compiled using `pcap_compile` or a similar mechanism before being passed to `pcap_setfilter`. Passing an uninitialized or partially initialized `bpf_program` can lead to memory corruption or crashes.**
+// Violation: Passing an uninitialized bpf_program structure.
+pcap_t *handle = pcap_open_live("eth0", BUFSIZ, 0, 1000, errbuf);
+if (handle == NULL) {
+fprintf(stderr, "couldn't open device %s: %s\n", "eth0", errbuf);
+return 2;
+}
+struct bpf_program fp; // Declared but not compiled
+// Missing call to pcap_compile(&fp, ...)
+if (pcap_setfilter(handle, &fp) == -1) {
+fprintf(stderr, "Couldn't install filter: %s\n", pcap_geterr(handle));
+pcap_close(handle);
+return 1;
+}
+pcap_close(handle);
+6

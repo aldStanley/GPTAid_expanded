@@ -1,0 +1,1035 @@
+Question: 
+Given the following function `pcap_parsesrcstr_ex` in library `libpcap`, Complete the following tasks.
+```
+int pcap_parsesrcstr_ex(const char *source, int *type, char *userinfo, char *host,
+    char *port, char *name, unsigned char *uses_ssl, char *errbuf){
+	char *scheme, *tmpuserinfo, *tmphost, *tmpport, *tmppath;
+
+	/* Initialization stuff */
+	if (userinfo)
+		*userinfo = '\0';
+	if (host)
+		*host = '\0';
+	if (port)
+		*port = '\0';
+	if (name)
+		*name = '\0';
+	if (uses_ssl)
+		*uses_ssl = 0;
+
+	/* Parse the source string */
+	if (pcap_parse_source(source, &scheme, &tmpuserinfo, &tmphost,
+	    &tmpport, &tmppath, errbuf) == -1) {
+		/*
+		 * Fail.
+		 */
+		return (-1);
+	}
+
+	if (scheme == NULL) {
+		/*
+		 * Local device.
+		 */
+		if (name && tmppath)
+			pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+		if (type)
+			*type = PCAP_SRC_IFLOCAL;
+		free(tmppath);
+		free(tmpport);
+		free(tmphost);
+		free(tmpuserinfo);
+		return (0);
+	}
+
+	int is_rpcap = 0;
+	if (strcmp(scheme, "rpcaps") == 0) {
+		is_rpcap = 1;
+		if (uses_ssl) *uses_ssl = 1;
+	} else if (strcmp(scheme, "rpcap") == 0) {
+		is_rpcap = 1;
+	}
+
+	if (is_rpcap) {
+		/*
+		 * rpcap[s]://
+		 *
+		 * pcap_parse_source() has already handled the case of
+		 * rpcap[s]://device
+		 */
+		if (userinfo && tmpuserinfo)
+			pcap_strlcpy(userinfo, tmpuserinfo, PCAP_BUF_SIZE);
+		if (host && tmphost)
+			pcap_strlcpy(host, tmphost, PCAP_BUF_SIZE);
+		if (port && tmpport)
+			pcap_strlcpy(port, tmpport, PCAP_BUF_SIZE);
+		if (name && tmppath)
+			pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+		if (type)
+			*type = PCAP_SRC_IFREMOTE;
+		free(tmppath);
+		free(tmpport);
+		free(tmphost);
+		free(tmpuserinfo);
+		free(scheme);
+		return (0);
+	}
+
+	if (strcmp(scheme, "file") == 0) {
+		/*
+		 * file://
+		 */
+		if (name && tmppath)
+			pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+		if (type)
+			*type = PCAP_SRC_FILE;
+		free(tmppath);
+		free(tmpport);
+		free(tmphost);
+		free(tmpuserinfo);
+		free(scheme);
+		return (0);
+	}
+
+	/*
+	 * Neither rpcap: nor file:; just treat the entire string
+	 * as a local device.
+	 */
+	if (name)
+		pcap_strlcpy(name, source, PCAP_BUF_SIZE);
+	if (type)
+		*type = PCAP_SRC_IFLOCAL;
+	free(tmppath);
+	free(tmpport);
+	free(tmphost);
+	free(tmpuserinfo);
+	free(scheme);
+	return (0);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_parsesrcstr_ex success" after calling `pcap_parsesrcstr_ex` successfully; Output: "Calling pcap_parsesrcstr_ex fail" after the call to `pcap_parsesrcstr_ex` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_parsesrcstr_ex\n")
+    ```
+    before calling `pcap_parsesrcstr_ex`. Make sure that there are no other function calls between this output and the calling to `pcap_parsesrcstr_ex`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+```cpp
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h> // For certain types of device names, though not strictly required by pcap_parsesrcstr_ex itself
+
+// Assume PCAP_BUF_SIZE is defined in pcap.h or a similar header
+// If not, you might need to define it. For this example, let's assume a reasonable size.
+#ifndef PCAP_BUF_SIZE
+#define PCAP_BUF_SIZE 256
+#endif
+
+// Forward declaration of pcap_parse_source, as it's called by pcap_parsesrcstr_ex
+// but not provided in the snippet. In a real scenario, this would be in libpcap.
+// For compilation purposes here, we'll provide a mock implementation.
+// THIS IS A MOCK IMPLEMENTATION FOR COMPILATION ONLY.
+// The actual pcap_parse_source is more complex.
+int pcap_parse_source(const char *source, char **scheme, char **userinfo,
+    char **host, char **port, char **path, char *errbuf) {
+    *scheme = NULL;
+    *userinfo = NULL;
+    *host = NULL;
+    *port = NULL;
+    *path = NULL;
+
+    if (source == NULL || strlen(source) == 0) {
+        snprintf(errbuf, PCAP_BUF_SIZE, "Source string is empty or NULL.");
+        return -1;
+    }
+
+    const char *scheme_sep = strstr(source, "://");
+    if (scheme_sep) {
+        size_t scheme_len = scheme_sep - source;
+        *scheme = (char *)malloc(scheme_len + 1);
+        if (*scheme == NULL) {
+            snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for scheme.");
+            return -1;
+        }
+        strncpy(*scheme, source, scheme_len);
+        (*scheme)[scheme_len] = '\0';
+
+        const char *rest_of_source = scheme_sep + 3; // Skip "://"
+
+        // Basic parsing for rpcap:// or file://
+        // This mock only handles a simplified structure for demonstration
+        const char *userinfo_end = strchr(rest_of_source, '@');
+        const char *host_start = rest_of_source;
+        const char *port_start = NULL;
+        const char *path_start = NULL;
+
+        if (userinfo_end) {
+            size_t userinfo_len = userinfo_end - rest_of_source;
+            *userinfo = (char *)malloc(userinfo_len + 1);
+            if (*userinfo == NULL) {
+                snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for userinfo.");
+                free(*scheme); *scheme = NULL;
+                return -1;
+            }
+            strncpy(*userinfo, rest_of_source, userinfo_len);
+            (*userinfo)[userinfo_len] = '\0';
+            host_start = userinfo_end + 1;
+        }
+
+        const char *port_sep = strchr(host_start, ':');
+        const char *path_sep = strchr(host_start, '/');
+
+        if (port_sep && (!path_sep || port_sep < path_sep)) {
+            size_t host_len = port_sep - host_start;
+            *host = (char *)malloc(host_len + 1);
+            if (*host == NULL) {
+                snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for host.");
+                free(*scheme); *scheme = NULL; free(*userinfo); *userinfo = NULL;
+                return -1;
+            }
+            strncpy(*host, host_start, host_len);
+            (*host)[host_len] = '\0';
+
+            port_start = port_sep + 1;
+            const char *port_end = port_start;
+            while (*port_end && (*port_end >= '0' && *port_end <= '9')) {
+                port_end++;
+            }
+            if (port_end > port_start) {
+                size_t port_len = port_end - port_start;
+                *port = (char *)malloc(port_len + 1);
+                if (*port == NULL) {
+                    snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for port.");
+                    free(*scheme); *scheme = NULL; free(*userinfo); *userinfo = NULL; free(*host); *host = NULL;
+                    return -1;
+                }
+                strncpy(*port, port_start, port_len);
+                (*port)[port_len] = '\0';
+                path_start = port_end;
+            } else {
+                path_start = port_sep; // If it's not a valid port number, it might be part of the path
+            }
+        } else if (path_sep) {
+            size_t host_len = path_sep - host_start;
+            *host = (char *)malloc(host_len + 1);
+            if (*host == NULL) {
+                snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for host.");
+                free(*scheme); *scheme = NULL; free(*userinfo); *userinfo = NULL;
+                return -1;
+            }
+            strncpy(*host, host_start, host_len);
+            (*host)[host_len] = '\0';
+            path_start = path_sep;
+        } else {
+            // Only host, no port or path
+            *host = strdup(host_start);
+            if (*host == NULL) {
+                snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for host.");
+                free(*scheme); *scheme = NULL; free(*userinfo); *userinfo = NULL;
+                return -1;
+            }
+        }
+
+        if (path_start) {
+            *path = strdup(path_start);
+            if (*path == NULL) {
+                snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for path.");
+                free(*scheme); *scheme = NULL; free(*userinfo); *userinfo = NULL; free(*host); *host = NULL; free(*port); *port = NULL;
+                return -1;
+            }
+        }
+
+    } else {
+        // No scheme found, assume it's a local device path
+        *path = strdup(source);
+        if (*path == NULL) {
+            snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for path.");
+            return -1;
+        }
+    }
+
+    // Free any allocated memory if not used (e.g. if path was parsed but not needed by caller)
+    // This mock assumes all are potentially needed. The actual pcap_parse_source manages this.
+
+    return 0;
+}
+
+// Mock for pcap_strlcpy if not available (e.g., older glibc or BSD systems)
+#ifndef HAVE_STRLCPY
+size_t pcap_strlcpy(char *dst, const char *src, size_t dstsize) {
+    size_t srclen;
+    size_t len;
+
+    srclen = strlen(src);
+    len = (srclen < dstsize) ? srclen : (dstsize - 1);
+
+    if (len > 0) {
+        memcpy(dst, src, len);
+    }
+    dst[len] = '\0';
+
+    return srclen;
+}
+#endif
+
+// Assume pcap_parsesrcstr_ex is defined in libpcap and linked
+extern int pcap_parsesrcstr_ex(const char *source, int *type, char *userinfo, char *host,
+    char *port, char *name, unsigned char *uses_ssl, char *errbuf);
+
+// Mock for pcap_free_databuf - the real libpcap might have this.
+// For this example, we'll assume the caller (pcap_parsesrcstr_ex) frees memory it allocates.
+// The provided pcap_parsesrcstr_ex snippet already has `free` calls.
+
+// Mock for pcap_open_live which might be called after parsing
+// For this example, we are only focusing on pcap_parsesrcstr_ex.
+
+int main() {
+    int ret;
+    char errbuf[PCAP_BUF_SIZE];
+
+    // --- Test Case 1: Local device ---
+    const char *local_device_source = "eth0";
+    int type_local;
+    char userinfo_local[PCAP_BUF_SIZE];
+    char host_local[PCAP_BUF_SIZE];
+    char port_local[PCAP_BUF_SIZE];
+    char name_local[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_local;
+
+    printf("--- Testing local device ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(local_device_source, &type_local, userinfo_local, host_local,
+                              port_local, name_local, &uses_ssl_local, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed local device: name=%s, type=%d\n", name_local, type_local);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing '%s': %s\n", local_device_source, errbuf);
+        fflush(stderr);
+        return 123;
+    }
+    printf("----------------------------\n\n");
+    fflush(stdout);
+
+
+    // --- Test Case 2: File source ---
+    const char *file_source = "file:///path/to/your/example.pcap"; // Using .pcap for file type
+    int type_file;
+    char userinfo_file[PCAP_BUF_SIZE];
+    char host_file[PCAP_BUF_SIZE];
+    char port_file[PCAP_BUF_SIZE];
+    char name_file[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_file;
+
+    printf("--- Testing file source ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(file_source, &type_file, userinfo_file, host_file,
+                              port_file, name_file, &uses_ssl_file, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed file: name=%s, type=%d\n", name_file, type_file);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing '%s': %s\n", file_source, errbuf);
+        fflush(stderr);
+        return 123;
+    }
+    printf("---------------------------\n\n");
+    fflush(stdout);
+
+    // --- Test Case 3: rpcap source (no SSL) ---
+    const char *rpcap_source = "rpcap://user:pass@remote.host.com:1234/device_name";
+    int type_rpcap;
+    char userinfo_rpcap[PCAP_BUF_SIZE];
+    char host_rpcap[PCAP_BUF_SIZE];
+    char port_rpcap[PCAP_BUF_SIZE];
+    char name_rpcap[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_rpcap;
+
+    printf("--- Testing rpcap source (no SSL) ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(rpcap_source, &type_rpcap, userinfo_rpcap, host_rpcap,
+                              port_rpcap, name_rpcap, &uses_ssl_rpcap, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed rpcap: userinfo=%s, host=%s, port=%s, name=%s, uses_ssl=%d, type=%d\n",
+               userinfo_rpcap, host_rpcap, port_rpcap, name_rpcap, uses_ssl_rpcap, type_rpcap);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing '%s': %s\n", rpcap_source, errbuf);
+        fflush(stderr);
+        return 123;
+    }
+    printf("-------------------------------------\n\n");
+    fflush(stdout);
+
+    // --- Test Case 4: rpcaps source (with SSL) ---
+    const char *rpcaps_source = "rpcaps://admin@secure.server:5678/remote_device";
+    int type_rpcaps;
+    char userinfo_rpcaps[PCAP_BUF_SIZE];
+    char host_rpcaps[PCAP_BUF_SIZE];
+    char port_rpcaps[PCAP_BUF_SIZE];
+    char name_rpcaps[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_rpcaps;
+
+    printf("--- Testing rpcaps source (with SSL) ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(rpcaps_source, &type_rpcaps, userinfo_rpcaps, host_rpcaps,
+                              port_rpcaps, name_rpcaps, &uses_ssl_rpcaps, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed rpcaps: userinfo=%s, host=%s, port=%s, name=%s, uses_ssl=%d, type=%d\n",
+               userinfo_rpcaps, host_rpcaps, port_rpcaps, name_rpcaps, uses_ssl_rpcaps, type_rpcaps);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing '%s': %s\n", rpcaps_source, errbuf);
+        fflush(stderr);
+        return 123;
+    }
+    printf("--------------------------------------\n\n");
+    fflush(stdout);
+
+    // --- Test Case 5: Invalid source string (empty) ---
+    const char *invalid_source_empty = "";
+    int type_invalid_empty;
+    char userinfo_invalid_empty[PCAP_BUF_SIZE];
+    char host_invalid_empty[PCAP_BUF_SIZE];
+    char port_invalid_empty[PCAP_BUF_SIZE];
+    char name_invalid_empty[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_invalid_empty;
+
+    printf("--- Testing invalid source (empty) ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(invalid_source_empty, &type_invalid_empty, userinfo_invalid_empty, host_invalid_empty,
+                              port_invalid_empty, name_invalid_empty, &uses_ssl_invalid_empty, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed invalid (unexpected success): name=%s\n", name_invalid_empty);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing '%s': %s\n", invalid_source_empty, errbuf);
+        fflush(stderr);
+        // Expected to fail
+    }
+    printf("-------------------------------------\n\n");
+    fflush(stdout);
+
+
+    // --- Test Case 6: Invalid source string (NULL) ---
+    const char *invalid_source_null = NULL;
+    int type_invalid_null;
+    char userinfo_invalid_null[PCAP_BUF_SIZE];
+    char host_invalid_null[PCAP_BUF_SIZE];
+    char port_invalid_null[PCAP_BUF_SIZE];
+    char name_invalid_null[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_invalid_null;
+
+    printf("--- Testing invalid source (NULL) ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(invalid_source_null, &type_invalid_null, userinfo_invalid_null, host_invalid_null,
+                              port_invalid_null, name_invalid_null, &uses_ssl_invalid_null, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed invalid (unexpected success): name=%s\n", name_invalid_null);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing NULL source: %s\n", errbuf);
+        fflush(stderr);
+        // Expected to fail
+    }
+    printf("-------------------------------------\n\n");
+    fflush(stdout);
+
+
+    return 0;
+}
+
+/*
+Task 1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+
+The `pcap_parsesrcstr_ex` function is designed to parse a source string that describes a network interface, a file, or a remote capture session. The caller needs to follow these specifications:
+
+1.  **`source` (const char *):** This is the primary input string to be parsed. It can represent a local interface name (e.g., "eth0"), a file path (e.g., "file:///path/to/capture.pcap"), or a remote capture source (e.g., "rpcap://host/interface" or "rpcaps://host/interface"). It should not be NULL if parsing is expected to succeed.
+
+2.  **`type` (int *):** A pointer to an integer. If not NULL, this pointer will be updated to indicate the type of the parsed source. The possible values are `PCAP_SRC_IFLOCAL` (for local devices), `PCAP_SRC_IFREMOTE` (for rpcap/rpcaps), and `PCAP_SRC_FILE` (for file://). The caller must provide storage for this integer.
+
+3.  **`userinfo` (char *):** A pointer to a character buffer. If not NULL, this buffer will be populated with user authentication information (username and password) if present in the source string (e.g., for "rpcap://user:pass@host/..."). The caller must ensure this buffer is large enough to hold the user information and its null terminator (ideally `PCAP_BUF_SIZE`).
+
+4.  **`host` (char *):** A pointer to a character buffer. If not NULL, this buffer will be populated with the hostname or IP address of the remote capture server (for "rpcap://" or "rpcaps://"). The caller must ensure this buffer is large enough to hold the host information and its null terminator (ideally `PCAP_BUF_SIZE`).
+
+5.  **`port` (char *):** A pointer to a character buffer. If not NULL, this buffer will be populated with the port number for the remote capture server (for "rpcap://" or "rpcaps://"). The caller must ensure this buffer is large enough to hold the port number and its null terminator (ideally `PCAP_BUF_SIZE`).
+
+6.  **`name` (char *):** A pointer to a character buffer. If not NULL, this buffer will be populated with the actual name of the device, file, or remote session. For local devices, this will be the interface name. For files, it will be the file path. For remote sources, it will be the remote interface/device name. The caller must ensure this buffer is large enough to hold the name and its null terminator (ideally `PCAP_BUF_SIZE`).
+
+7.  **`uses_ssl` (unsigned char *):** A pointer to an unsigned character. If not NULL, this variable will be set to 1 if the source uses SSL (i.e., "rpcaps://") and 0 otherwise. The caller must provide storage for this byte.
+
+8.  **`errbuf` (char *):** A pointer to a character buffer. If the function returns -1 (indicating an error), this buffer will contain a descriptive error message. The caller must ensure this buffer is large enough to hold error messages (ideally `PCAP_BUF_SIZE`).
+
+**Return Value:**
+*   `0`: Success. The source string was parsed without errors.
+*   `-1`: Failure. An error occurred during parsing. The `errbuf` will contain details.
+
+**Memory Management:**
+The function `pcap_parsesrcstr_ex` allocates memory internally for `scheme`, `tmpuserinfo`, `tmphost`, `tmpport`, and `tmppath`. It then copies relevant parts of this memory into the caller-provided buffers (`userinfo`, `host`, `port`, `name`). Crucially, `pcap_parsesrcstr_ex` is responsible for freeing all the memory it allocates internally before returning, whether successfully or on error. The caller does *not* need to free memory pointed to by `scheme`, `tmpuserinfo`, etc., as they are local to `pcap_parsesrcstr_ex`.
+*/
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Assume PCAP_BUF_SIZE is defined in pcap.h or a similar header
+// If not, you might need to define it. For this example, let's assume a reasonable size.
+#ifndef PCAP_BUF_SIZE
+#define PCAP_BUF_SIZE 256
+#endif
+
+// Forward declaration of pcap_parse_source, as it's called by pcap_parsesrcstr_ex
+// but not provided in the snippet. In a real scenario, this would be in libpcap.
+// For compilation purposes here, we'll provide a mock implementation.
+// THIS IS A MOCK IMPLEMENTATION FOR COMPILATION ONLY.
+// The actual pcap_parse_source is more complex.
+int pcap_parse_source(const char *source, char **scheme, char **userinfo,
+    char **host, char **port, char **path, char *errbuf) {
+    *scheme = NULL;
+    *userinfo = NULL;
+    *host = NULL;
+    *port = NULL;
+    *path = NULL;
+
+    if (source == NULL || strlen(source) == 0) {
+        snprintf(errbuf, PCAP_BUF_SIZE, "Source string is empty or NULL.");
+        return -1;
+    }
+
+    const char *scheme_sep = strstr(source, "://");
+    if (scheme_sep) {
+        size_t scheme_len = scheme_sep - source;
+        *scheme = (char *)malloc(scheme_len + 1);
+        if (*scheme == NULL) {
+            snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for scheme.");
+            return -1;
+        }
+        strncpy(*scheme, source, scheme_len);
+        (*scheme)[scheme_len] = '\0';
+
+        const char *rest_of_source = scheme_sep + 3; // Skip "://"
+
+        // Basic parsing for rpcap:// or file://
+        // This mock only handles a simplified structure for demonstration
+        const char *userinfo_end = strchr(rest_of_source, '@');
+        const char *host_start = rest_of_source;
+        const char *port_start = NULL;
+        const char *path_start = NULL;
+
+        if (userinfo_end) {
+            size_t userinfo_len = userinfo_end - rest_of_source;
+            *userinfo = (char *)malloc(userinfo_len + 1);
+            if (*userinfo == NULL) {
+                snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for userinfo.");
+                free(*scheme); *scheme = NULL;
+                return -1;
+            }
+            strncpy(*userinfo, rest_of_source, userinfo_len);
+            (*userinfo)[userinfo_len] = '\0';
+            host_start = userinfo_end + 1;
+        }
+
+        const char *port_sep = strchr(host_start, ':');
+        const char *path_sep = strchr(host_start, '/');
+
+        if (port_sep && (!path_sep || port_sep < path_sep)) {
+            size_t host_len = port_sep - host_start;
+            *host = (char *)malloc(host_len + 1);
+            if (*host == NULL) {
+                snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for host.");
+                free(*scheme); *scheme = NULL; free(*userinfo); *userinfo = NULL;
+                return -1;
+            }
+            strncpy(*host, host_start, host_len);
+            (*host)[host_len] = '\0';
+
+            port_start = port_sep + 1;
+            const char *port_end = port_start;
+            while (*port_end && (*port_end >= '0' && *port_end <= '9')) {
+                port_end++;
+            }
+            if (port_end > port_start) {
+                size_t port_len = port_end - port_start;
+                *port = (char *)malloc(port_len + 1);
+                if (*port == NULL) {
+                    snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for port.");
+                    free(*scheme); *scheme = NULL; free(*userinfo); *userinfo = NULL; free(*host); *host = NULL;
+                    return -1;
+                }
+                strncpy(*port, port_start, port_len);
+                (*port)[port_len] = '\0';
+                path_start = port_end;
+            } else {
+                path_start = port_sep; // If it's not a valid port number, it might be part of the path
+            }
+        } else if (path_sep) {
+            size_t host_len = path_sep - host_start;
+            *host = (char *)malloc(host_len + 1);
+            if (*host == NULL) {
+                snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for host.");
+                free(*scheme); *scheme = NULL; free(*userinfo); *userinfo = NULL;
+                return -1;
+            }
+            strncpy(*host, host_start, host_len);
+            (*host)[host_len] = '\0';
+            path_start = path_sep;
+        } else {
+            // Only host, no port or path
+            *host = strdup(host_start);
+            if (*host == NULL) {
+                snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for host.");
+                free(*scheme); *scheme = NULL; free(*userinfo); *userinfo = NULL;
+                return -1;
+            }
+        }
+
+        if (path_start) {
+            *path = strdup(path_start);
+            if (*path == NULL) {
+                snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for path.");
+                free(*scheme); *scheme = NULL; free(*userinfo); *userinfo = NULL; free(*host); *host = NULL; free(*port); *port = NULL;
+                return -1;
+            }
+        }
+
+    } else {
+        // No scheme found, assume it's a local device path
+        *path = strdup(source);
+        if (*path == NULL) {
+            snprintf(errbuf, PCAP_BUF_SIZE, "Memory allocation failed for path.");
+            return -1;
+        }
+    }
+
+    // Free any allocated memory if not used (e.g. if path was parsed but not needed by caller)
+    // This mock assumes all are potentially needed. The actual pcap_parse_source manages this.
+
+    return 0;
+}
+
+// Mock for pcap_strlcpy if not available (e.g., older glibc or BSD systems)
+#ifndef HAVE_STRLCPY
+size_t pcap_strlcpy(char *dst, const char *src, size_t dstsize) {
+    size_t srclen;
+    size_t len;
+
+    srclen = strlen(src);
+    len = (srclen < dstsize) ? srclen : (dstsize - 1);
+
+    if (len > 0) {
+        memcpy(dst, src, len);
+    }
+    dst[len] = '\0';
+
+    return srclen;
+}
+#endif
+
+// Assume pcap_parsesrcstr_ex is defined in libpcap and linked
+extern int pcap_parsesrcstr_ex(const char *source, int *type, char *userinfo, char *host,
+    char *port, char *name, unsigned char *uses_ssl, char *errbuf);
+
+// Mock for pcap_free_databuf - the real libpcap might have this.
+// For this example, we'll assume the caller (pcap_parsesrcstr_ex) frees memory it allocates.
+// The provided pcap_parsesrcstr_ex snippet already has `free` calls.
+
+// Mock for pcap_open_live which might be called after parsing
+// For this example, we are only focusing on pcap_parsesrcstr_ex.
+
+int main() {
+    int ret;
+    char errbuf[PCAP_BUF_SIZE];
+
+    // --- Test Case 1: Local device ---
+    const char *local_device_source = "eth0";
+    int type_local;
+    char userinfo_local[PCAP_BUF_SIZE];
+    char host_local[PCAP_BUF_SIZE];
+    char port_local[PCAP_BUF_SIZE];
+    char name_local[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_local;
+
+    printf("--- Testing local device ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(local_device_source, &type_local, userinfo_local, host_local,
+                              port_local, name_local, &uses_ssl_local, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed local device: name=%s, type=%d\n", name_local, type_local);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing '%s': %s\n", local_device_source, errbuf);
+        fflush(stderr);
+        return 123;
+    }
+    printf("----------------------------\n\n");
+    fflush(stdout);
+
+
+    // --- Test Case 2: File source ---
+    const char *file_source = "file:///path/to/your/example.pcap"; // Using .pcap for file type
+    int type_file;
+    char userinfo_file[PCAP_BUF_SIZE];
+    char host_file[PCAP_BUF_SIZE];
+    char port_file[PCAP_BUF_SIZE];
+    char name_file[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_file;
+
+    printf("--- Testing file source ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(file_source, &type_file, userinfo_file, host_file,
+                              port_file, name_file, &uses_ssl_file, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed file: name=%s, type=%d\n", name_file, type_file);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing '%s': %s\n", file_source, errbuf);
+        fflush(stderr);
+        return 123;
+    }
+    printf("---------------------------\n\n");
+    fflush(stdout);
+
+    // --- Test Case 3: rpcap source (no SSL) ---
+    const char *rpcap_source = "rpcap://user:pass@remote.host.com:1234/device_name";
+    int type_rpcap;
+    char userinfo_rpcap[PCAP_BUF_SIZE];
+    char host_rpcap[PCAP_BUF_SIZE];
+    char port_rpcap[PCAP_BUF_SIZE];
+    char name_rpcap[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_rpcap;
+
+    printf("--- Testing rpcap source (no SSL) ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(rpcap_source, &type_rpcap, userinfo_rpcap, host_rpcap,
+                              port_rpcap, name_rpcap, &uses_ssl_rpcap, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed rpcap: userinfo=%s, host=%s, port=%s, name=%s, uses_ssl=%d, type=%d\n",
+               userinfo_rpcap, host_rpcap, port_rpcap, name_rpcap, uses_ssl_rpcap, type_rpcap);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing '%s': %s\n", rpcap_source, errbuf);
+        fflush(stderr);
+        return 123;
+    }
+    printf("-------------------------------------\n\n");
+    fflush(stdout);
+
+    // --- Test Case 4: rpcaps source (with SSL) ---
+    const char *rpcaps_source = "rpcaps://admin@secure.server:5678/remote_device";
+    int type_rpcaps;
+    char userinfo_rpcaps[PCAP_BUF_SIZE];
+    char host_rpcaps[PCAP_BUF_SIZE];
+    char port_rpcaps[PCAP_BUF_SIZE];
+    char name_rpcaps[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_rpcaps;
+
+    printf("--- Testing rpcaps source (with SSL) ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(rpcaps_source, &type_rpcaps, userinfo_rpcaps, host_rpcaps,
+                              port_rpcaps, name_rpcaps, &uses_ssl_rpcaps, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed rpcaps: userinfo=%s, host=%s, port=%s, name=%s, uses_ssl=%d, type=%d\n",
+               userinfo_rpcaps, host_rpcaps, port_rpcaps, name_rpcaps, uses_ssl_rpcaps, type_rpcaps);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing '%s': %s\n", rpcaps_source, errbuf);
+        fflush(stderr);
+        return 123;
+    }
+    printf("--------------------------------------\n\n");
+    fflush(stdout);
+
+    // --- Test Case 5: Invalid source string (empty) ---
+    const char *invalid_source_empty = "";
+    int type_invalid_empty;
+    char userinfo_invalid_empty[PCAP_BUF_SIZE];
+    char host_invalid_empty[PCAP_BUF_SIZE];
+    char port_invalid_empty[PCAP_BUF_SIZE];
+    char name_invalid_empty[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_invalid_empty;
+
+    printf("--- Testing invalid source (empty) ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(invalid_source_empty, &type_invalid_empty, userinfo_invalid_empty, host_invalid_empty,
+                              port_invalid_empty, name_invalid_empty, &uses_ssl_invalid_empty, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed invalid (unexpected success): name=%s\n", name_invalid_empty);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing '%s': %s\n", invalid_source_empty, errbuf);
+        fflush(stderr);
+        // Expected to fail
+    }
+    printf("-------------------------------------\n\n");
+    fflush(stdout);
+
+
+    // --- Test Case 6: Invalid source string (NULL) ---
+    const char *invalid_source_null = NULL;
+    int type_invalid_null;
+    char userinfo_invalid_null[PCAP_BUF_SIZE];
+    char host_invalid_null[PCAP_BUF_SIZE];
+    char port_invalid_null[PCAP_BUF_SIZE];
+    char name_invalid_null[PCAP_BUF_SIZE];
+    unsigned char uses_ssl_invalid_null;
+
+    printf("--- Testing invalid source (NULL) ---\n");
+    fflush(stdout);
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+    ret = pcap_parsesrcstr_ex(invalid_source_null, &type_invalid_null, userinfo_invalid_null, host_invalid_null,
+                              port_invalid_null, name_invalid_null, &uses_ssl_invalid_null, errbuf);
+
+    if (ret == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        printf("Parsed invalid (unexpected success): name=%s\n", name_invalid_null);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing NULL source: %s\n", errbuf);
+        fflush(stderr);
+        // Expected to fail
+    }
+    printf("-------------------------------------\n\n");
+    fflush(stdout);
+
+
+    return 0;
+}
+
+/*
+Task 1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+
+The `pcap_parsesrcstr_ex` function is designed to parse a source string that describes a network interface, a file, or a remote capture session. The caller needs to follow these specifications:
+
+1.  **`source` (const char *):** This is the primary input string to be parsed. It can represent a local interface name (e.g., "eth0"), a file path (e.g., "file:///path/to/capture.pcap"), or a remote capture source (e.g., "rpcap://host/interface" or "rpcaps://host/interface"). It should not be NULL if parsing is expected to succeed.
+
+2.  **`type` (int *):** A pointer to an integer. If not NULL, this pointer will be updated to indicate the type of the parsed source. The possible values are `PCAP_SRC_IFLOCAL` (for local devices), `PCAP_SRC_IFREMOTE` (for rpcap/rpcaps), and `PCAP_SRC_FILE` (for file://). The caller must provide storage for this integer.
+
+3.  **`userinfo` (char *):** A pointer to a character buffer. If not NULL, this buffer will be populated with user authentication information (username and password) if present in the source string (e.g., for "rpcap://user:pass@host/..."). The caller must ensure this buffer is large enough to hold the user information and its null terminator (ideally `PCAP_BUF_SIZE`).
+
+4.  **`host` (char *):** A pointer to a character buffer. If not NULL, this buffer will be populated with the hostname or IP address of the remote capture server (for "rpcap://" or "rpcaps://"). The caller must ensure this buffer is large enough to hold the host information and its null terminator (ideally `PCAP_BUF_SIZE`).
+
+5.  **`port` (char *):** A pointer to a character buffer. If not NULL, this buffer will be populated with the port number for the remote capture server (for "rpcap://" or "rpcaps://"). The caller must ensure this buffer is large enough to hold the port number and its null terminator (ideally `PCAP_BUF_SIZE`).
+
+6.  **`name` (char *):** A pointer to a character buffer. If not NULL, this buffer will be populated with the actual name of the device, file, or remote session. For local devices, this will be the interface name. For files, it will be the file path. For remote sources, it will be the remote interface/device name. The caller must ensure this buffer is large enough to hold the name and its null terminator (ideally `PCAP_BUF_SIZE`).
+
+7.  **`uses_ssl` (unsigned char *):** A pointer to an unsigned character. If not NULL, this variable will be set to 1 if the source uses SSL (i.e., "rpcaps://") and 0 otherwise. The caller must provide storage for this byte.
+
+8.  **`errbuf` (char *):** A pointer to a character buffer. If the function returns -1 (indicating an error), this buffer will contain a descriptive error message. The caller must ensure this buffer is large enough to hold error messages (ideally `PCAP_BUF_SIZE`).
+
+**Return Value:**
+*   `0`: Success. The source string was parsed without errors.
+*   `-1`: Failure. An error occurred during parsing. The `errbuf` will contain details.
+
+**Memory Management:**
+The function `pcap_parsesrcstr_ex` allocates memory internally for `scheme`, `tmpuserinfo`, `tmphost`, `tmpport`, and `tmppath`. It then copies relevant parts of this memory into the caller-provided buffers (`userinfo`, `host`, `port`, `name`). Crucially, `pcap_parsesrcstr_ex` is responsible for freeing all the memory it allocates internally before returning, whether successfully or on error. The caller does *not* need to free memory pointed to by `scheme`, `tmpuserinfo`, etc., as they are local to `pcap_parsesrcstr_ex`.
+*/
+
+
+ Run result: 
+False
+
+I0423 14:27:17.452115 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452714 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452736 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452739 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452741 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452744 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452746 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452748 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452750 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452756 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452757 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452759 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452761 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452763 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452765 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452767 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452769 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452771 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452773 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452778 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452780 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452782 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452784 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452786 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452788 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452790 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452792 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452794 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452795 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452797 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452799 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452801 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452803 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452805 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452807 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452809 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452814 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452816 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452818 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452820 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452822 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452823 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452825 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452827 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452829 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452831 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452833 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452835 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452837 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452838 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452840 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452842 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452844 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452846 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452848 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452850 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452851 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452854 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452856 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452858 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452859 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452861 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452863 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452865 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452867 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452869 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452871 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452873 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452874 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452876 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452878 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452880 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452884 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452885 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452887 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452895 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452901 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452910 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452913 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452915 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452917 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452919 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452921 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:27:17.452923 15336463 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+/usr/bin/ld: /tmp/ccA2vdOI.o: in function `main':
+/sandbox/pcap_parsesrcstr_ex.c:190: undefined reference to `pcap_parsesrcstr_ex'
+/usr/bin/ld: /sandbox/pcap_parsesrcstr_ex.c:223: undefined reference to `pcap_parsesrcstr_ex'
+/usr/bin/ld: /sandbox/pcap_parsesrcstr_ex.c:255: undefined reference to `pcap_parsesrcstr_ex'
+/usr/bin/ld: /sandbox/pcap_parsesrcstr_ex.c:288: undefined reference to `pcap_parsesrcstr_ex'
+/usr/bin/ld: /sandbox/pcap_parsesrcstr_ex.c:321: undefined reference to `pcap_parsesrcstr_ex'
+/usr/bin/ld: /tmp/ccA2vdOI.o:/sandbox/pcap_parsesrcstr_ex.c:354: more undefined references to `pcap_parsesrcstr_ex' follow
+collect2: error: ld returned 1 exit status
+
+compile
+Break cant parse code. token_right: 38263. Token_one: 6621
+Answer: 

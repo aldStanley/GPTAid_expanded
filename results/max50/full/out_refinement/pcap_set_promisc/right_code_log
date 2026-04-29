@@ -1,0 +1,589 @@
+Question: 
+Given the following function `pcap_set_promisc` in library `libpcap`, Complete the following tasks.
+```
+int pcap_set_promisc(pcap_t *p, int promisc){
+	if (pcap_check_activated(p))
+		return (PCAP_ERROR_ACTIVATED);
+	p->opt.promisc = promisc;
+	return (0);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_set_promisc success" after calling `pcap_set_promisc` successfully; Output: "Calling pcap_set_promisc fail" after the call to `pcap_set_promisc` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_set_promisc\n")
+    ```
+    before calling `pcap_set_promisc`. Make sure that there are no other function calls between this output and the calling to `pcap_set_promisc`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+Let's break down the `pcap_set_promisc` function and then create the required C code.
+
+## Task 1: Invocation Specification Analysis
+
+The `pcap_set_promisc` function has the following signature:
+```c
+int pcap_set_promisc(pcap_t *p, int promisc)
+```
+
+Here's the invocation specification the caller needs to follow:
+
+1.  **`pcap_t *p`**: This is a pointer to a `pcap_t` structure. This structure represents an active packet capture handle.
+    *   **Requirement:** The caller must obtain a valid `pcap_t` handle before calling `pcap_set_promisc`. This is typically done by calling `pcap_open_live()` or `pcap_open_offline()`.
+    *   **Crucial Constraint:** The function code explicitly checks `if (pcap_check_activated(p))`. This means the `pcap_t` handle **must NOT** be in an activated state. A `pcap_t` handle is considered activated after `pcap_open_live` is called and before `pcap_close` is called, but before `pcap_setnonblock` is called or after `pcap_dispatch` or `pcap_loop` has been called. The intent here is that `pcap_set_promisc` should be called *before* starting packet capture (i.e., before `pcap_loop` or `pcap_dispatch`).
+    *   **Return Value on Violation:** If `pcap_check_activated(p)` returns true, the function returns `PCAP_ERROR_ACTIVATED`.
+
+2.  **`int promisc`**: This integer argument controls the promiscuous mode setting.
+    *   **Requirement:** The caller should pass an integer value.
+        *   A non-zero value (typically `1`) usually enables promiscuous mode.
+        *   A zero value (`0`) usually disables promiscuous mode.
+    *   **Return Value:**
+        *   `0`: Success.
+        *   `PCAP_ERROR_ACTIVATED`: The `pcap_t` handle was already activated.
+
+## Task 2: Complete Linux C Code
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <pcap.h>
+
+// Define a constant for the return code on failure
+#define FAILURE_RETURN_CODE 123
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL; // Initialize handle to NULL
+
+    // 1. Obtain a pcap_t handle.
+    // We use pcap_open_live for this example.
+    // For a non-interactive and non-infinite loop, we need to specify
+    // the interface. Let's try to open the first available interface.
+    // In a real-world scenario, you'd want to handle interface selection more robustly.
+
+    // Find a suitable network interface.
+    char *interface = pcap_lookupdev(errbuf);
+    if (interface == NULL) {
+        fprintf(stderr, "Error finding default network interface: %s\n", errbuf);
+        fflush(stdout);
+        return FAILURE_RETURN_CODE;
+    }
+    printf("Using network interface: %s\n", interface);
+    fflush(stdout);
+
+    // Open the network device for live capture.
+    // We set a snaplen (snapshot length) and a timeout.
+    // Crucially, we are NOT starting capture yet.
+    handle = pcap_open_live(interface, BUFSIZ, 0, 100, errbuf); // promisc is set to 0 initially here, but we'll change it.
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening device %s: %s\n", interface, errbuf);
+        fflush(stdout);
+        return FAILURE_RETURN_CODE;
+    }
+    printf("Successfully opened network interface for pcap.\n");
+    fflush(stdout);
+
+    // Now, we call pcap_set_promisc.
+    // According to the function's check (pcap_check_activated),
+    // we should call this *before* starting packet capture (e.g., before pcap_loop/dispatch).
+    // pcap_open_live itself does not activate the handle for capture,
+    // so it should be safe to call pcap_set_promisc here.
+
+    int promiscuous_mode_setting = 1; // Set to 1 to enable promiscuous mode
+
+    printf("before pcap_set_promisc\n");
+    fflush(stdout);
+
+    // Call pcap_set_promisc
+    int result = pcap_set_promisc(handle, promiscuous_mode_setting);
+
+    // Check the status of the pcap_set_promisc call
+    if (result == 0) {
+        printf("Calling pcap_set_promisc success\n");
+        fflush(stdout);
+    } else {
+        fprintf(stderr, "Calling pcap_set_promisc fail. Error code: %d\n", result);
+        // Attempt to get a more descriptive error message if possible, though pcap_set_promisc itself doesn't directly provide one for this specific error.
+        // The error code PCAP_ERROR_ACTIVATED is self-explanatory based on the function's logic.
+        if (result == PCAP_ERROR_ACTIVATED) {
+            fprintf(stderr, "  Reason: The pcap handle was already activated.\n");
+        } else {
+            fprintf(stderr, "  An unknown error occurred.\n");
+        }
+        fflush(stdout);
+        // Clean up the handle before returning
+        pcap_close(handle);
+        return FAILURE_RETURN_CODE;
+    }
+
+    // We are not starting packet capture in this example to keep it non-interactive.
+    // If we were to start capture, we'd call pcap_loop or pcap_dispatch here.
+    // For example:
+    // pcap_loop(handle, 1, my_packet_handler, NULL); // Capture just 1 packet
+
+    // Clean up the pcap handle
+    printf("Cleaning up pcap handle.\n");
+    fflush(stdout);
+    pcap_close(handle);
+
+    return 0; // Success
+}
+```
+ parse code: 
+
+ Run result: 
+False
+The code you generated did not call the API `pcap_set_promisc`, I am sure this api exists in this library, please check and make sure you call this api.
+noapi
+Question: 
+Run result of the code is: 
+The code you generated did not call the API `pcap_set_promisc`, I am sure this api exists in this library, please check and make sure you call this api.Please fix this code based on the run result. Please Follow the instruction in the first session! 
+Note: I am using the program automation to run the code you gave, so please generate the code directly that will run correctly.
+Answer Format: ```code```
+Answer: 
+I apologize for the oversight. It seems my previous response did not correctly generate the code that invokes `pcap_set_promisc`. I have reviewed the function's requirements and the need to have a valid `pcap_t` handle that is *not* yet activated.
+
+The core issue might be how `pcap_open_live` interacts with `pcap_check_activated`. The documentation for `libpcap` (and its Windows counterpart `WinPcap`/`Npcap`) generally implies that `pcap_open_live` *prepares* the handle but doesn't fully *activate* it for capture until functions like `pcap_loop` or `pcap_dispatch` are called. Therefore, calling `pcap_set_promisc` *after* `pcap_open_live` but *before* `pcap_loop`/`pcap_dispatch` should be the correct invocation sequence.
+
+Let's ensure the code explicitly calls `pcap_set_promisc` and checks its return value.
+
+```code
+#include <stdio.h>
+#include <stdlib.h>
+#include <pcap.h>
+
+// Define a constant for the return code on failure
+#define FAILURE_RETURN_CODE 123
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL; // Initialize handle to NULL
+
+    // 1. Obtain a pcap_t handle.
+    // We use pcap_open_live for this example.
+    // For a non-interactive and non-infinite loop, we need to specify
+    // the interface. Let's try to open the first available interface.
+    // In a real-world scenario, you'd want to handle interface selection more robustly.
+
+    // Find a suitable network interface.
+    char *interface = pcap_lookupdev(errbuf);
+    if (interface == NULL) {
+        fprintf(stderr, "Error finding default network interface: %s\n", errbuf);
+        fflush(stdout);
+        return FAILURE_RETURN_CODE;
+    }
+    printf("Using network interface: %s\n", interface);
+    fflush(stdout);
+
+    // Open the network device for live capture.
+    // We set a snaplen (snapshot length) and a timeout.
+    // We set the initial 'promisc' argument in pcap_open_live to 0,
+    // as we intend to set it using pcap_set_promisc later.
+    handle = pcap_open_live(interface, BUFSIZ, 0, 100, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening device %s: %s\n", interface, errbuf);
+        fflush(stdout);
+        return FAILURE_RETURN_CODE;
+    }
+    printf("Successfully opened network interface for pcap.\n");
+    fflush(stdout);
+
+    // Now, we call pcap_set_promisc.
+    // According to the function's check (pcap_check_activated),
+    // we should call this *before* starting packet capture (e.g., before pcap_loop/dispatch).
+    // pcap_open_live itself does not activate the handle for capture,
+    // so it should be safe to call pcap_set_promisc here.
+
+    int promiscuous_mode_setting = 1; // Set to 1 to enable promiscuous mode
+
+    printf("before pcap_set_promisc\n");
+    fflush(stdout);
+
+    // *** Explicitly calling pcap_set_promisc ***
+    int result = pcap_set_promisc(handle, promiscuous_mode_setting);
+
+    // Check the status of the pcap_set_promisc call
+    if (result == 0) {
+        printf("Calling pcap_set_promisc success\n");
+        fflush(stdout);
+    } else {
+        fprintf(stderr, "Calling pcap_set_promisc fail. Error code: %d\n", result);
+        // Attempt to get a more descriptive error message if possible.
+        // The error code PCAP_ERROR_ACTIVATED is self-explanatory based on the function's logic.
+        if (result == PCAP_ERROR_ACTIVATED) {
+            fprintf(stderr, "  Reason: The pcap handle was already activated.\n");
+        } else {
+            fprintf(stderr, "  An unknown error occurred.\n");
+        }
+        fflush(stdout);
+        // Clean up the handle before returning
+        pcap_close(handle);
+        return FAILURE_RETURN_CODE;
+    }
+
+    // We are not starting packet capture in this example to keep it non-interactive.
+    // If we were to start capture, we'd call pcap_loop or pcap_dispatch here.
+    // For example:
+    // pcap_loop(handle, 1, my_packet_handler, NULL); // Capture just 1 packet
+
+    // Clean up the pcap handle
+    printf("Cleaning up pcap handle.\n");
+    fflush(stdout);
+    pcap_close(handle);
+
+    return 0; // Success
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Define a constant for the return code on failure
+#define FAILURE_RETURN_CODE 123
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL; // Initialize handle to NULL
+
+    // 1. Obtain a pcap_t handle.
+    // We use pcap_open_live for this example.
+    // For a non-interactive and non-infinite loop, we need to specify
+    // the interface. Let's try to open the first available interface.
+    // In a real-world scenario, you'd want to handle interface selection more robustly.
+
+    // Find a suitable network interface.
+    char *interface = pcap_lookupdev(errbuf);
+    if (interface == NULL) {
+        fprintf(stderr, "Error finding default network interface: %s\n", errbuf);
+        fflush(stdout);
+        return FAILURE_RETURN_CODE;
+    }
+    printf("Using network interface: %s\n", interface);
+    fflush(stdout);
+
+    // Open the network device for live capture.
+    // We set a snaplen (snapshot length) and a timeout.
+    // We set the initial 'promisc' argument in pcap_open_live to 0,
+    // as we intend to set it using pcap_set_promisc later.
+    handle = pcap_open_live(interface, BUFSIZ, 0, 100, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening device %s: %s\n", interface, errbuf);
+        fflush(stdout);
+        return FAILURE_RETURN_CODE;
+    }
+    printf("Successfully opened network interface for pcap.\n");
+    fflush(stdout);
+
+    // Now, we call pcap_set_promisc.
+    // According to the function's check (pcap_check_activated),
+    // we should call this *before* starting packet capture (e.g., before pcap_loop/dispatch).
+    // pcap_open_live itself does not activate the handle for capture,
+    // so it should be safe to call pcap_set_promisc here.
+
+    int promiscuous_mode_setting = 1; // Set to 1 to enable promiscuous mode
+
+    printf("before pcap_set_promisc\n");
+    fflush(stdout);
+
+    // *** Explicitly calling pcap_set_promisc ***
+    int result = pcap_set_promisc(handle, promiscuous_mode_setting);
+
+    // Check the status of the pcap_set_promisc call
+    if (result == 0) {
+        printf("Calling pcap_set_promisc success\n");
+        fflush(stdout);
+    } else {
+        fprintf(stderr, "Calling pcap_set_promisc fail. Error code: %d\n", result);
+        // Attempt to get a more descriptive error message if possible.
+        // The error code PCAP_ERROR_ACTIVATED is self-explanatory based on the function's logic.
+        if (result == PCAP_ERROR_ACTIVATED) {
+            fprintf(stderr, "  Reason: The pcap handle was already activated.\n");
+        } else {
+            fprintf(stderr, "  An unknown error occurred.\n");
+        }
+        fflush(stdout);
+        // Clean up the handle before returning
+        pcap_close(handle);
+        return FAILURE_RETURN_CODE;
+    }
+
+    // We are not starting packet capture in this example to keep it non-interactive.
+    // If we were to start capture, we'd call pcap_loop or pcap_dispatch here.
+    // For example:
+    // pcap_loop(handle, 1, my_packet_handler, NULL); // Capture just 1 packet
+
+    // Clean up the pcap handle
+    printf("Cleaning up pcap handle.\n");
+    fflush(stdout);
+    pcap_close(handle);
+
+    return 0; // Success
+}
+
+
+ Run result: 
+False
+Using network interface: eth0
+Successfully opened network interface for pcap.
+before pcap_set_promisc
+
+I0426 04:25:57.372027 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.372878 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.372995 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.372997 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373000 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373003 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373005 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373007 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373009 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373012 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373014 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373016 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373018 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373020 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373022 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373024 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373026 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373028 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373031 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373033 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373035 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373037 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373039 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373041 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373043 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373045 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373047 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373049 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373051 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373053 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373055 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373057 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373059 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373061 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373063 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373065 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373068 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373070 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373085 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373087 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373089 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373091 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373093 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373094 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373096 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373098 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373100 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373102 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373104 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373106 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373108 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373109 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373111 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373113 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373115 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373117 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373119 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373120 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373122 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373124 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373126 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373128 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373130 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373132 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373133 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373156 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373253 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373260 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373265 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373269 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373274 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373278 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373292 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373296 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373301 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373305 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373309 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373313 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373317 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373321 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373325 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373329 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373333 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373338 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373342 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373346 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373351 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373363 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373367 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373372 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373376 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373380 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373384 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373388 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373392 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373397 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373401 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373405 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373410 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373414 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373418 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373422 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373426 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373431 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373435 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373440 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373444 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373448 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373452 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373456 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373460 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373464 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373469 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373473 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373478 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373482 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373486 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373490 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373495 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373507 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373511 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373515 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373519 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373523 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373528 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373532 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373536 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373540 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373544 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373548 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373552 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373556 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373561 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373565 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373569 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373573 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373577 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373581 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373585 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373589 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373594 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373598 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373602 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373606 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373633 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373638 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373642 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373646 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373650 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373654 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373658 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373662 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373666 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373671 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373675 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373679 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373686 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373691 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373695 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373704 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373709 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373713 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373717 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373721 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373726 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373730 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373734 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373738 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373742 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373746 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373751 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373755 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373759 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373764 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373768 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373772 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373776 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373780 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373785 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373789 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373793 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373798 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373802 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373806 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373810 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373815 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373819 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373823 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373827 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373832 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373836 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373840 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373844 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373848 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373853 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373857 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373861 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373866 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373870 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373875 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373879 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373883 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373888 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373892 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373896 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373901 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373905 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373909 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373913 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373918 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373922 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373927 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373931 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373936 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373940 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373944 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373949 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373953 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373958 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373962 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373966 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373971 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373975 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373979 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373984 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373988 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373992 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.373997 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374002 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374006 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374011 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374015 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374020 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374024 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374029 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374033 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374037 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374042 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374046 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 04:25:57.374050 19173749 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+Calling pcap_set_promisc fail. Error code: -4
+  Reason: The pcap handle was already activated.
+
+error-handling
+token_right: 5065. Token_one: 1893
+Break cant parse code. token_right: 37746. Token_one: 1893
+Answer: 

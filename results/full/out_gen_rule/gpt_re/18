@@ -1,0 +1,1209 @@
+
+Question: 
+source code of `pcap_parsesrcstr_ex`:
+```
+int pcap_parsesrcstr_ex(const char *source, int *type, char *userinfo, char *host,
+    char *port, char *name, unsigned char *uses_ssl, char *errbuf){
+	char *scheme, *tmpuserinfo, *tmphost, *tmpport, *tmppath;
+
+	/* Initialization stuff */
+	if (userinfo)
+		*userinfo = '\0';
+	if (host)
+		*host = '\0';
+	if (port)
+		*port = '\0';
+	if (name)
+		*name = '\0';
+	if (uses_ssl)
+		*uses_ssl = 0;
+
+	/* Parse the source string */
+	if (pcap_parse_source(source, &scheme, &tmpuserinfo, &tmphost,
+	    &tmpport, &tmppath, errbuf) == -1) {
+		/*
+		 * Fail.
+		 */
+		return (-1);
+	}
+
+	if (scheme == NULL) {
+		/*
+		 * Local device.
+		 */
+		if (name && tmppath)
+			pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+		if (type)
+			*type = PCAP_SRC_IFLOCAL;
+		free(tmppath);
+		free(tmpport);
+		free(tmphost);
+		free(tmpuserinfo);
+		return (0);
+	}
+
+	int is_rpcap = 0;
+	if (strcmp(scheme, "rpcaps") == 0) {
+		is_rpcap = 1;
+		if (uses_ssl) *uses_ssl = 1;
+	} else if (strcmp(scheme, "rpcap") == 0) {
+		is_rpcap = 1;
+	}
+
+	if (is_rpcap) {
+		/*
+		 * rpcap[s]://
+		 *
+		 * pcap_parse_source() has already handled the case of
+		 * rpcap[s]://device
+		 */
+		if (userinfo && tmpuserinfo)
+			pcap_strlcpy(userinfo, tmpuserinfo, PCAP_BUF_SIZE);
+		if (host && tmphost)
+			pcap_strlcpy(host, tmphost, PCAP_BUF_SIZE);
+		if (port && tmpport)
+			pcap_strlcpy(port, tmpport, PCAP_BUF_SIZE);
+		if (name && tmppath)
+			pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+		if (type)
+			*type = PCAP_SRC_IFREMOTE;
+		free(tmppath);
+		free(tmpport);
+		free(tmphost);
+		free(tmpuserinfo);
+		free(scheme);
+		return (0);
+	}
+
+	if (strcmp(scheme, "file") == 0) {
+		/*
+		 * file://
+		 */
+		if (name && tmppath)
+			pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+		if (type)
+			*type = PCAP_SRC_FILE;
+		free(tmppath);
+		free(tmpport);
+		free(tmphost);
+		free(tmpuserinfo);
+		free(scheme);
+		return (0);
+	}
+
+	/*
+	 * Neither rpcap: nor file:; just treat the entire string
+	 * as a local device.
+	 */
+	if (name)
+		pcap_strlcpy(name, source, PCAP_BUF_SIZE);
+	if (type)
+		*type = PCAP_SRC_IFLOCAL;
+	free(tmppath);
+	free(tmpport);
+	free(tmphost);
+	free(tmpuserinfo);
+	free(scheme);
+	return (0);
+}
+
+```
+
+Source code of called function `pcap_parse_source`:
+```
+int pcap_parse_source(const char *source, char **schemep, char **userinfop,
+    char **hostp, char **portp, char **pathp, char *ebuf){
+	char *colonp;
+	size_t scheme_len;
+	char *scheme;
+	const char *endp;
+	size_t authority_len;
+	char *authority;
+	char *parsep, *atsignp, *bracketp;
+	char *userinfo, *host, *port, *path;
+
+	/*
+	 * Start out returning nothing.
+	 */
+	*schemep = NULL;
+	*userinfop = NULL;
+	*hostp = NULL;
+	*portp = NULL;
+	*pathp = NULL;
+
+	/*
+	 * RFC 3986 says:
+	 *
+	 *   URI         = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+	 *
+	 *   hier-part   = "//" authority path-abempty
+	 *               / path-absolute
+	 *               / path-rootless
+	 *               / path-empty
+	 *
+	 *   authority   = [ userinfo "@" ] host [ ":" port ]
+	 *
+	 *   userinfo    = *( unreserved / pct-encoded / sub-delims / ":" )
+         *
+         * Step 1: look for the ":" at the end of the scheme.
+	 * A colon in the source is *NOT* sufficient to indicate that
+	 * this is a URL, as interface names on some platforms might
+	 * include colons (e.g., I think some Solaris interfaces
+	 * might).
+	 */
+	colonp = strchr(source, ':');
+	if (colonp == NULL) {
+		/*
+		 * The source is the device to open.
+		 * Return a NULL pointer for the scheme, user information,
+		 * host, and port, and return the device as the path.
+		 */
+		*pathp = strdup(source);
+		if (*pathp == NULL) {
+			pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+			    errno, "malloc");
+			return (-1);
+		}
+		return (0);
+	}
+
+	/*
+	 * All schemes must have "//" after them, i.e. we only support
+	 * hier-part   = "//" authority path-abempty, not
+	 * hier-part   = path-absolute
+	 * hier-part   = path-rootless
+	 * hier-part   = path-empty
+	 *
+	 * We need that in order to distinguish between a local device
+	 * name that happens to contain a colon and a URI.
+	 */
+	if (strncmp(colonp + 1, "//", 2) != 0) {
+		/*
+		 * The source is the device to open.
+		 * Return a NULL pointer for the scheme, user information,
+		 * host, and port, and return the device as the path.
+		 */
+		*pathp = strdup(source);
+		if (*pathp == NULL) {
+			pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+			    errno, "malloc");
+			return (-1);
+		}
+		return (0);
+	}
+
+	/*
+	 * XXX - check whether the purported scheme could be a scheme?
+	 */
+
+	/*
+	 * OK, this looks like a URL.
+	 * Get the scheme.
+	 */
+	scheme_len = colonp - source;
+	scheme = malloc(scheme_len + 1);
+	if (scheme == NULL) {
+		pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+		    errno, "malloc");
+		return (-1);
+	}
+	memcpy(scheme, source, scheme_len);
+	scheme[scheme_len] = '\0';
+
+	/*
+	 * Treat file: specially - take everything after file:// as
+	 * the pathname.
+	 */
+	if (pcap_strcasecmp(scheme, "file") == 0) {
+		*pathp = strdup(colonp + 3);
+		if (*pathp == NULL) {
+			pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+			    errno, "malloc");
+			free(scheme);
+			return (-1);
+		}
+		*schemep = scheme;
+		return (0);
+	}
+
+	/*
+	 * The WinPcap documentation says you can specify a local
+	 * interface with "rpcap://{device}"; we special-case
+	 * that here.  If the scheme is "rpcap", and there are
+	 * no slashes past the "//", we just return the device.
+	 *
+	 * XXX - %-escaping?
+	 */
+	if ((pcap_strcasecmp(scheme, "rpcap") == 0 ||
+	    pcap_strcasecmp(scheme, "rpcaps") == 0) &&
+	    strchr(colonp + 3, '/') == NULL) {
+		/*
+		 * Local device.
+		 *
+		 * Return a NULL pointer for the scheme, user information,
+		 * host, and port, and return the device as the path.
+		 */
+		free(scheme);
+		*pathp = strdup(colonp + 3);
+		if (*pathp == NULL) {
+			pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+			    errno, "malloc");
+			return (-1);
+		}
+		return (0);
+	}
+
+	/*
+	 * OK, now start parsing the authority.
+	 * Get token, terminated with / or terminated at the end of
+	 * the string.
+	 */
+	authority_len = strcspn(colonp + 3, "/");
+	authority = get_substring(colonp + 3, authority_len, ebuf);
+	if (authority == NULL) {
+		/*
+		 * Error.
+		 */
+		free(scheme);
+		return (-1);
+	}
+	endp = colonp + 3 + authority_len;
+
+	/*
+	 * Now carve the authority field into its components.
+	 */
+	parsep = authority;
+
+	/*
+	 * Is there a userinfo field?
+	 */
+	atsignp = strchr(parsep, '@');
+	if (atsignp != NULL) {
+		/*
+		 * Yes.
+		 */
+		size_t userinfo_len;
+
+		userinfo_len = atsignp - parsep;
+		userinfo = get_substring(parsep, userinfo_len, ebuf);
+		if (userinfo == NULL) {
+			/*
+			 * Error.
+			 */
+			free(authority);
+			free(scheme);
+			return (-1);
+		}
+		parsep = atsignp + 1;
+	} else {
+		/*
+		 * No.
+		 */
+		userinfo = NULL;
+	}
+
+	/*
+	 * Is there a host field?
+	 */
+	if (*parsep == '\0') {
+		/*
+		 * No; there's no host field or port field.
+		 */
+		host = NULL;
+		port = NULL;
+	} else {
+		/*
+		 * Yes.
+		 */
+		size_t host_len;
+
+		/*
+		 * Is it an IP-literal?
+		 */
+		if (*parsep == '[') {
+			/*
+			 * Yes.
+			 * Treat verything up to the closing square
+			 * bracket as the IP-Literal; we don't worry
+			 * about whether it's a valid IPv6address or
+			 * IPvFuture (or an IPv4address, for that
+			 * matter, just in case we get handed a
+			 * URL with an IPv4 IP-Literal, of the sort
+			 * that pcap_createsrcstr() used to generate,
+			 * and that pcap_parsesrcstr(), in the original
+			 * WinPcap code, accepted).
+			 */
+			bracketp = strchr(parsep, ']');
+			if (bracketp == NULL) {
+				/*
+				 * There's no closing square bracket.
+				 */
+				snprintf(ebuf, PCAP_ERRBUF_SIZE,
+				    "IP-literal in URL doesn't end with ]");
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+			if (*(bracketp + 1) != '\0' &&
+			    *(bracketp + 1) != ':') {
+				/*
+				 * There's extra crud after the
+				 * closing square bracketn.
+				 */
+				snprintf(ebuf, PCAP_ERRBUF_SIZE,
+				    "Extra text after IP-literal in URL");
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+			host_len = (bracketp - 1) - parsep;
+			host = get_substring(parsep + 1, host_len, ebuf);
+			if (host == NULL) {
+				/*
+				 * Error.
+				 */
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+			parsep = bracketp + 1;
+		} else {
+			/*
+			 * No.
+			 * Treat everything up to a : or the end of
+			 * the string as the host.
+			 */
+			host_len = strcspn(parsep, ":");
+			host = get_substring(parsep, host_len, ebuf);
+			if (host == NULL) {
+				/*
+				 * Error.
+				 */
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+			parsep = parsep + host_len;
+		}
+
+		/*
+		 * Is there a port field?
+		 */
+		if (*parsep == ':') {
+			/*
+			 * Yes.  It's the rest of the authority field.
+			 */
+			size_t port_len;
+
+			parsep++;
+			port_len = strlen(parsep);
+			port = get_substring(parsep, port_len, ebuf);
+			if (port == NULL) {
+				/*
+				 * Error.
+				 */
+				free(host);
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+		} else {
+			/*
+			 * No.
+			 */
+			port = NULL;
+		}
+	}
+	free(authority);
+
+	/*
+	 * Everything else is the path.  Strip off the leading /.
+	 */
+	if (*endp == '\0')
+		path = strdup("");
+	else
+		path = strdup(endp + 1);
+	if (path == NULL) {
+		pcap_fmt_errmsg_for_errno(ebuf, PCAP_ERRBUF_SIZE,
+		    errno, "malloc");
+		free(port);
+		free(host);
+		free(userinfo);
+		free(scheme);
+		return (-1);
+	}
+	*schemep = scheme;
+	*userinfop = userinfo;
+	*hostp = host;
+	*portp = port;
+	*pathp = path;
+	return (0);
+}
+
+```
+
+Please analyze the source code of the API `pcap_parsesrcstr_ex` and all the information provided before it. Then, respond with the following tasks:
+
+Task 1: Based on the analysis of the source code, provide a concise description of the functionality of the function.
+
+Task 2: Locate the code related to the Parameter 5 `port`.
+
+Task 3: Identify the security rules that should be observed for the Parameter 5 to prevent misuse of the API `pcap_parsesrcstr_ex`. For each rule, include code snippets that demonstrate a violation of the rule:
+
+1. Please provide detailed and specific descriptions for each rule. Clearly indicate which specific operations relate to the Parameter 5. If a rule can apply to multiple operations that breach the rule, please make it more specific.
+
+2. Each rule should focus on describing only one behavior if possible. If a rule encompasses multiple behaviors, please break it down into distinct rules.
+
+3. Each rule should correspond to a separate violation code.
+
+4. In cases where you're unsure about certain code details, you can suggest all possible rules, whether accurate or not, based on your knowledge database about potential API misuse.
+
+5. Each violation code should contain at least one call to `pcap_parsesrcstr_ex`
+
+6. Follow this format for each rule: Begin with an Arabic numeral, then describe the rule content (e.g., "1. Rule description"). Provide a corresponding violation code enclosed in triple backticks like this:
+```
+//Violation Code
+```
+Format Example For Each Rule:
+(Note: These examples are provided only for reference and should not influence the format of the responses.)
+1. Rule:
+Violation Code:
+```
+//Violation Code
+```
+1. Rule:
+Violation Code:
+```
+//Violation Code
+```
+
+
+
+Answer: 
+## Task 1: Functionality Description of `pcap_parsesrcstr_ex`
+
+The `pcap_parsesrcstr_ex` function parses a source string, which can represent a network interface, a remote capture source, or a file, into its constituent components. It identifies the type of source (local interface, remote capture, or file) and extracts relevant information such as user credentials, host, port, and the specific name or path of the source. It supports various URI schemes like `rpcap`, `rpcaps`, and `file`, and can also interpret strings without a scheme as local interfaces. The function populates output parameters with the parsed components and returns an integer indicating success or failure.
+
+## Task 2: Code Related to Parameter 5 `port`
+
+The code related to the `port` parameter is primarily within the `pcap_parse_source` function, which is called by `pcap_parsesrcstr_ex`.
+
+In `pcap_parsesrcstr_ex`:
+```c
+    if (port && tmpport)
+        pcap_strlcpy(port, tmpport, PCAP_BUF_SIZE);
+```
+This snippet copies the parsed port information from `tmpport` to the user-provided `port` buffer if both are not NULL.
+
+In `pcap_parse_source`:
+```c
+		/*
+		 * Is there a port field?
+		 */
+		if (*parsep == ':') {
+			/*
+			 * Yes.  It's the rest of the authority field.
+			 */
+			size_t port_len;
+
+			parsep++;
+			port_len = strlen(parsep);
+			port = get_substring(parsep, port_len, ebuf);
+			if (port == NULL) {
+				/*
+				 * Error.
+				 */
+				free(host);
+				free(userinfo);
+				free(authority);
+				free(scheme);
+				return (-1);
+			}
+		} else {
+			/*
+			 * No.
+			 */
+			port = NULL;
+		}
+```
+This section within `pcap_parse_source` identifies and extracts the port number from the authority part of the URI if a colon is present after the host. The extracted port is stored in the `port` local variable, which is then assigned to `*portp` (which corresponds to `tmpport` in `pcap_parsesrcstr_ex`).
+
+## Task 3: Security Rules for Parameter 5 `port`
+
+Here are the security rules that should be observed for the `port` parameter to prevent misuse of the `pcap_parsesrcstr_ex` API, along with violation codes.
+
+1.  **Rule:** The `port` parameter should not be used to specify ports that are known to be insecure or are commonly exploited. Applications should validate the provided port against a list of allowed or disallowed ports, especially when dealing with remote capture sources. Directly using a user-provided port without validation can lead to connections to malicious servers or services.
+
+    **Violation Code:**
+    ```c
+    #include <pcap.h>
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <string.h>
+
+    // Assume PCAP_BUF_SIZE is defined elsewhere and is sufficiently large.
+    #ifndef PCAP_BUF_SIZE
+    #define PCAP_BUF_SIZE 1024
+    #endif
+
+    // Mock definitions for pcap_parse_source and pcap_strlcpy for demonstration
+    int pcap_parse_source(const char *source, char **schemep, char **userinfop,
+        char **hostp, char **portp, char **pathp, char *ebuf) {
+        // Simplified mock implementation for demonstration
+        if (strcmp(source, "rpcap://malicious.com:23") == 0) {
+            *schemep = strdup("rpcap");
+            *hostp = strdup("malicious.com");
+            *portp = strdup("23"); // Telnet port, often used for exploits
+            *pathp = strdup("");
+            return 0;
+        }
+        if (strcmp(source, "rpcap://example.com:8080") == 0) {
+            *schemep = strdup("rpcap");
+            *hostp = strdup("example.com");
+            *portp = strdup("8080");
+            *pathp = strdup("");
+            return 0;
+        }
+        return -1; // Indicate failure for other inputs
+    }
+
+    void pcap_strlcpy(char *dst, const char *src, size_t n) {
+        strncpy(dst, src, n - 1);
+        dst[n - 1] = '\0';
+    }
+
+    // Mock pcap_fmt_errmsg_for_errno for demonstration
+    void pcap_fmt_errmsg_for_errno(char *errbuf, size_t errbuf_size, int errno_val, const char *fmt, ...) {
+        snprintf(errbuf, errbuf_size, "Error: %s", fmt);
+    }
+
+    // Mock pcap_strcasecmp for demonstration
+    int pcap_strcasecmp(const char *s1, const char *s2) {
+        return strcasecmp(s1, s2);
+    }
+
+    // Mock get_substring for demonstration
+    char *get_substring(const char *str, size_t len, char *ebuf) {
+        char *sub = malloc(len + 1);
+        if (sub) {
+            memcpy(sub, str, len);
+            sub[len] = '\0';
+        } else {
+            pcap_fmt_errmsg_for_errno(ebuf, PCAP_BUF_SIZE, errno, "malloc");
+        }
+        return sub;
+    }
+
+    // Mock free for demonstration
+    void free(void *ptr) {
+        // In a real scenario, this would call the system free.
+        // For this mock, we assume it's handled.
+    }
+
+    // Mock strdup for demonstration
+    char *strdup(const char *s) {
+        char *new_s = malloc(strlen(s) + 1);
+        if (new_s) {
+            strcpy(new_s, s);
+        }
+        return new_s;
+    }
+
+    // Mock strchr for demonstration
+    char *strchr(const char *s, int c) {
+        return strchr(s, c);
+    }
+
+    // Mock strncmp for demonstration
+    int strncmp(const char *s1, const char *s2, size_t n) {
+        return strncmp(s1, s2, n);
+    }
+
+    // Mock strcspn for demonstration
+    size_t strcspn(const char *s, const char *reject) {
+        return strcspn(s, reject);
+    }
+
+    // Mock strlen for demonstration
+    size_t strlen(const char *s) {
+        return strlen(s);
+    }
+
+    // Mock memcpy for demonstration
+    void *memcpy(void *dest, const void *src, size_t n) {
+        return memcpy(dest, src, n);
+    }
+
+    // Mock strncpy for demonstration
+    char *strncpy(char *dest, const char *src, size_t n) {
+        return strncpy(dest, src, n);
+    }
+
+    // Mock snprintf for demonstration
+    int snprintf(char *str, size_t size, const char *format, ...) {
+        // Simplified mock
+        return 0;
+    }
+
+    // Mock strcasecmp for demonstration
+    int strcasecmp(const char *s1, const char *s2) {
+        return strcasecmp(s1, s2);
+    }
+
+    // Mock strdup for demonstration
+    char *strdup(const char *s) {
+        char *new_s = malloc(strlen(s) + 1);
+        if (new_s) {
+            strcpy(new_s, s);
+        }
+        return new_s;
+    }
+
+    // Mock strchr for demonstration
+    char *strchr(const char *s, int c) {
+        return strchr(s, c);
+    }
+
+    // Mock strncmp for demonstration
+    int strncmp(const char *s1, const char *s2, size_t n) {
+        return strncmp(s1, s2, n);
+    }
+
+    // Mock strcspn for demonstration
+    size_t strcspn(const char *s, const char *reject) {
+        return strcspn(s, reject);
+    }
+
+    // Mock strlen for demonstration
+    size_t strlen(const char *s) {
+        return strlen(s);
+    }
+
+    // Mock memcpy for demonstration
+    void *memcpy(void *dest, const void *src, size_t n) {
+        return memcpy(dest, src, n);
+    }
+
+    // Mock strncpy for demonstration
+    char *strncpy(char *dest, const char *src, size_t n) {
+        return strncpy(dest, src, n);
+    }
+
+    // Mock snprintf for demonstration
+    int snprintf(char *str, size_t size, const char *format, ...) {
+        // Simplified mock
+        return 0;
+    }
+
+    // Mock strcasecmp for demonstration
+    int strcasecmp(const char *s1, const char *s2) {
+        return strcasecmp(s1, s2);
+    }
+
+    // Mock pcap_parsesrcstr_ex for demonstration
+    int pcap_parsesrcstr_ex(const char *source, int *type, char *userinfo, char *host,
+        char *port, char *name, unsigned char *uses_ssl, char *errbuf) {
+        char *scheme = NULL, *tmpuserinfo = NULL, *tmphost = NULL, *tmpport = NULL, *tmppath = NULL;
+
+        if (pcap_parse_source(source, &scheme, &tmpuserinfo, &tmphost,
+            &tmpport, &tmppath, errbuf) == -1) {
+            return (-1);
+        }
+
+        if (scheme == NULL) {
+            if (name && tmppath) pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+            if (type) *type = 0; // PCAP_SRC_IFLOCAL
+            free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo);
+            return (0);
+        }
+
+        int is_rpcap = 0;
+        if (strcmp(scheme, "rpcaps") == 0) {
+            is_rpcap = 1;
+            if (uses_ssl) *uses_ssl = 1;
+        } else if (strcmp(scheme, "rpcap") == 0) {
+            is_rpcap = 1;
+        }
+
+        if (is_rpcap) {
+            if (userinfo && tmpuserinfo) pcap_strlcpy(userinfo, tmpuserinfo, PCAP_BUF_SIZE);
+            if (host && tmphost) pcap_strlcpy(host, tmphost, PCAP_BUF_SIZE);
+            if (port && tmpport) pcap_strlcpy(port, tmpport, PCAP_BUF_SIZE);
+            if (name && tmppath) pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+            if (type) *type = 1; // PCAP_SRC_IFREMOTE
+            free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo); free(scheme);
+            return (0);
+        }
+
+        if (strcmp(scheme, "file") == 0) {
+            if (name && tmppath) pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+            if (type) *type = 2; // PCAP_SRC_FILE
+            free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo); free(scheme);
+            return (0);
+        }
+
+        if (name) pcap_strlcpy(name, source, PCAP_BUF_SIZE);
+        if (type) *type = 0; // PCAP_SRC_IFLOCAL
+        free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo); free(scheme);
+        return (0);
+    }
+
+    int main() {
+        char errbuf[PCAP_BUF_SIZE];
+        char port_buffer[PCAP_BUF_SIZE];
+        int type;
+        char name_buffer[PCAP_BUF_SIZE];
+        char host_buffer[PCAP_BUF_SIZE];
+        char userinfo_buffer[PCAP_BUF_SIZE];
+        unsigned char uses_ssl;
+
+        // Violation: Using a known insecure port (Telnet)
+        if (pcap_parsesrcstr_ex("rpcap://malicious.com:23", &type, userinfo_buffer, host_buffer, port_buffer, name_buffer, &uses_ssl, errbuf) == -1) {
+            fprintf(stderr, "Error parsing source: %s\n", errbuf);
+        } else {
+            printf("Parsed source: Type=%d, Host=%s, Port=%s, Name=%s\n", type, host_buffer, port_buffer, name_buffer);
+            // In a real application, you would check if port_buffer contains "23"
+            // and disallow the connection or warn the user.
+            if (strcmp(port_buffer, "23") == 0) {
+                printf("WARNING: Insecure port (23) detected. This could be a security risk.\n");
+            }
+        }
+
+        // Non-violating example
+        if (pcap_parsesrcstr_ex("rpcap://example.com:8080", &type, userinfo_buffer, host_buffer, port_buffer, name_buffer, &uses_ssl, errbuf) == -1) {
+            fprintf(stderr, "Error parsing source: %s\n", errbuf);
+        } else {
+            printf("Parsed source: Type=%d, Host=%s, Port=%s, Name=%s\n", type, host_buffer, port_buffer, name_buffer);
+        }
+
+        return 0;
+    }
+    ```
+
+2.  **Rule:** The `port` parameter should not be used to specify ports that are outside the standard range (1-65535). While the `pcap_parse_source` function extracts the port as a string, the application using `pcap_parsesrcstr_ex` should validate that the extracted port string represents a valid integer within the acceptable range before attempting to establish a connection. Invalid port numbers can lead to connection failures or unexpected behavior.
+
+    **Violation Code:**
+    ```c
+    #include <pcap.h>
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <string.h>
+    #include <errno.h> // For errno
+
+    // Assume PCAP_BUF_SIZE is defined elsewhere and is sufficiently large.
+    #ifndef PCAP_BUF_SIZE
+    #define PCAP_BUF_SIZE 1024
+    #endif
+
+    // Mock definitions for pcap_parse_source and pcap_strlcpy for demonstration
+    int pcap_parse_source(const char *source, char **schemep, char **userinfop,
+        char **hostp, char **portp, char **pathp, char *ebuf) {
+        // Simplified mock implementation for demonstration
+        if (strcmp(source, "rpcap://example.com:99999") == 0) {
+            *schemep = strdup("rpcap");
+            *hostp = strdup("example.com");
+            *portp = strdup("99999"); // Invalid port number
+            *pathp = strdup("");
+            return 0;
+        }
+        if (strcmp(source, "rpcap://example.com:0") == 0) {
+            *schemep = strdup("rpcap");
+            *hostp = strdup("example.com");
+            *portp = strdup("0"); // Invalid port number
+            *pathp = strdup("");
+            return 0;
+        }
+        if (strcmp(source, "rpcap://example.com:abc") == 0) {
+            *schemep = strdup("rpcap");
+            *hostp = strdup("example.com");
+            *portp = strdup("abc"); // Non-numeric port
+            *pathp = strdup("");
+            return 0;
+        }
+        return -1; // Indicate failure for other inputs
+    }
+
+    void pcap_strlcpy(char *dst, const char *src, size_t n) {
+        strncpy(dst, src, n - 1);
+        dst[n - 1] = '\0';
+    }
+
+    // Mock pcap_fmt_errmsg_for_errno for demonstration
+    void pcap_fmt_errmsg_for_errno(char *errbuf, size_t errbuf_size, int errno_val, const char *fmt, ...) {
+        snprintf(errbuf, errbuf_size, "Error: %s", fmt);
+    }
+
+    // Mock pcap_strcasecmp for demonstration
+    int pcap_strcasecmp(const char *s1, const char *s2) {
+        return strcasecmp(s1, s2);
+    }
+
+    // Mock get_substring for demonstration
+    char *get_substring(const char *str, size_t len, char *ebuf) {
+        char *sub = malloc(len + 1);
+        if (sub) {
+            memcpy(sub, str, len);
+            sub[len] = '\0';
+        } else {
+            pcap_fmt_errmsg_for_errno(ebuf, PCAP_BUF_SIZE, errno, "malloc");
+        }
+        return sub;
+    }
+
+    // Mock free for demonstration
+    void free(void *ptr) {
+        // In a real scenario, this would call the system free.
+        // For this mock, we assume it's handled.
+    }
+
+    // Mock strdup for demonstration
+    char *strdup(const char *s) {
+        char *new_s = malloc(strlen(s) + 1);
+        if (new_s) {
+            strcpy(new_s, s);
+        }
+        return new_s;
+    }
+
+    // Mock strchr for demonstration
+    char *strchr(const char *s, int c) {
+        return strchr(s, c);
+    }
+
+    // Mock strncmp for demonstration
+    int strncmp(const char *s1, const char *s2, size_t n) {
+        return strncmp(s1, s2, n);
+    }
+
+    // Mock strcspn for demonstration
+    size_t strcspn(const char *s, const char *reject) {
+        return strcspn(s, reject);
+    }
+
+    // Mock strlen for demonstration
+    size_t strlen(const char *s) {
+        return strlen(s);
+    }
+
+    // Mock memcpy for demonstration
+    void *memcpy(void *dest, const void *src, size_t n) {
+        return memcpy(dest, src, n);
+    }
+
+    // Mock strncpy for demonstration
+    char *strncpy(char *dest, const char *src, size_t n) {
+        return strncpy(dest, src, n);
+    }
+
+    // Mock snprintf for demonstration
+    int snprintf(char *str, size_t size, const char *format, ...) {
+        // Simplified mock
+        return 0;
+    }
+
+    // Mock strcasecmp for demonstration
+    int strcasecmp(const char *s1, const char *s2) {
+        return strcasecmp(s1, s2);
+    }
+
+    // Mock pcap_parsesrcstr_ex for demonstration
+    int pcap_parsesrcstr_ex(const char *source, int *type, char *userinfo, char *host,
+        char *port, char *name, unsigned char *uses_ssl, char *errbuf) {
+        char *scheme = NULL, *tmpuserinfo = NULL, *tmphost = NULL, *tmpport = NULL, *tmppath = NULL;
+
+        if (pcap_parse_source(source, &scheme, &tmpuserinfo, &tmphost,
+            &tmpport, &tmppath, errbuf) == -1) {
+            return (-1);
+        }
+
+        if (scheme == NULL) {
+            if (name && tmppath) pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+            if (type) *type = 0; // PCAP_SRC_IFLOCAL
+            free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo);
+            return (0);
+        }
+
+        int is_rpcap = 0;
+        if (strcmp(scheme, "rpcaps") == 0) {
+            is_rpcap = 1;
+            if (uses_ssl) *uses_ssl = 1;
+        } else if (strcmp(scheme, "rpcap") == 0) {
+            is_rpcap = 1;
+        }
+
+        if (is_rpcap) {
+            if (userinfo && tmpuserinfo) pcap_strlcpy(userinfo, tmpuserinfo, PCAP_BUF_SIZE);
+            if (host && tmphost) pcap_strlcpy(host, tmphost, PCAP_BUF_SIZE);
+            if (port && tmpport) pcap_strlcpy(port, tmpport, PCAP_BUF_SIZE);
+            if (name && tmppath) pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+            if (type) *type = 1; // PCAP_SRC_IFREMOTE
+            free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo); free(scheme);
+            return (0);
+        }
+
+        if (strcmp(scheme, "file") == 0) {
+            if (name && tmppath) pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+            if (type) *type = 2; // PCAP_SRC_FILE
+            free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo); free(scheme);
+            return (0);
+        }
+
+        if (name) pcap_strlcpy(name, source, PCAP_BUF_SIZE);
+        if (type) *type = 0; // PCAP_SRC_IFLOCAL
+        free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo); free(scheme);
+        return (0);
+    }
+
+    int main() {
+        char errbuf[PCAP_BUF_SIZE];
+        char port_buffer[PCAP_BUF_SIZE];
+        int type;
+        char name_buffer[PCAP_BUF_SIZE];
+        char host_buffer[PCAP_BUF_SIZE];
+        char userinfo_buffer[PCAP_BUF_SIZE];
+        unsigned char uses_ssl;
+
+        // Violation: Using an out-of-range port number (greater than 65535)
+        if (pcap_parsesrcstr_ex("rpcap://example.com:99999", &type, userinfo_buffer, host_buffer, port_buffer, name_buffer, &uses_ssl, errbuf) == -1) {
+            fprintf(stderr, "Error parsing source: %s\n", errbuf);
+        } else {
+            printf("Parsed source: Type=%d, Host=%s, Port=%s, Name=%s\n", type, host_buffer, port_buffer, name_buffer);
+            // In a real application, you would attempt to convert port_buffer to an integer
+            // and check if it's within the valid range (1-65535).
+            long port_num = strtol(port_buffer, NULL, 10);
+            if (port_num <= 0 || port_num > 65535) {
+                printf("WARNING: Invalid port number (%s) detected. This could lead to connection issues.\n", port_buffer);
+            }
+        }
+
+        // Violation: Using port 0, which is invalid
+        if (pcap_parsesrcstr_ex("rpcap://example.com:0", &type, userinfo_buffer, host_buffer, port_buffer, name_buffer, &uses_ssl, errbuf) == -1) {
+            fprintf(stderr, "Error parsing source: %s\n", errbuf);
+        } else {
+            printf("Parsed source: Type=%d, Host=%s, Port=%s, Name=%s\n", type, host_buffer, port_buffer, name_buffer);
+            long port_num = strtol(port_buffer, NULL, 10);
+            if (port_num <= 0 || port_num > 65535) {
+                printf("WARNING: Invalid port number (%s) detected. This could lead to connection issues.\n", port_buffer);
+            }
+        }
+
+        // Violation: Using a non-numeric string as a port
+        if (pcap_parsesrcstr_ex("rpcap://example.com:abc", &type, userinfo_buffer, host_buffer, port_buffer, name_buffer, &uses_ssl, errbuf) == -1) {
+            fprintf(stderr, "Error parsing source: %s\n", errbuf);
+        } else {
+            printf("Parsed source: Type=%d, Host=%s, Port=%s, Name=%s\n", type, host_buffer, port_buffer, name_buffer);
+            long port_num = strtol(port_buffer, NULL, 10);
+            if (port_num <= 0 || port_num > 65535) {
+                printf("WARNING: Invalid port number (%s) detected. This could lead to connection issues.\n", port_buffer);
+            }
+        }
+
+        return 0;
+    }
+    ```
+
+3.  **Rule:** The `port` parameter should not be used to specify ports that are reserved for system services or are not intended for general application use. Applications should have a mechanism to identify and potentially disallow connections to such ports, as they might be used for internal system communication or have specific security implications.
+
+    **Violation Code:**
+    ```c
+    #include <pcap.h>
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <string.h>
+
+    // Assume PCAP_BUF_SIZE is defined elsewhere and is sufficiently large.
+    #ifndef PCAP_BUF_SIZE
+    #define PCAP_BUF_SIZE 1024
+    #endif
+
+    // Mock definitions for pcap_parse_source and pcap_strlcpy for demonstration
+    int pcap_parse_source(const char *source, char **schemep, char **userinfop,
+        char **hostp, char **portp, char **pathp, char *ebuf) {
+        // Simplified mock implementation for demonstration
+        if (strcmp(source, "rpcap://example.com:53") == 0) { // DNS port
+            *schemep = strdup("rpcap");
+            *hostp = strdup("example.com");
+            *portp = strdup("53");
+            *pathp = strdup("");
+            return 0;
+        }
+        if (strcmp(source, "rpcap://example.com:135") == 0) { // Microsoft RPC port
+            *schemep = strdup("rpcap");
+            *hostp = strdup("example.com");
+            *portp = strdup("135");
+            *pathp = strdup("");
+            return 0;
+        }
+        return -1; // Indicate failure for other inputs
+    }
+
+    void pcap_strlcpy(char *dst, const char *src, size_t n) {
+        strncpy(dst, src, n - 1);
+        dst[n - 1] = '\0';
+    }
+
+    // Mock pcap_fmt_errmsg_for_errno for demonstration
+    void pcap_fmt_errmsg_for_errno(char *errbuf, size_t errbuf_size, int errno_val, const char *fmt, ...) {
+        snprintf(errbuf, errbuf_size, "Error: %s", fmt);
+    }
+
+    // Mock pcap_strcasecmp for demonstration
+    int pcap_strcasecmp(const char *s1, const char *s2) {
+        return strcasecmp(s1, s2);
+    }
+
+    // Mock get_substring for demonstration
+    char *get_substring(const char *str, size_t len, char *ebuf) {
+        char *sub = malloc(len + 1);
+        if (sub) {
+            memcpy(sub, str, len);
+            sub[len] = '\0';
+        } else {
+            pcap_fmt_errmsg_for_errno(ebuf, PCAP_BUF_SIZE, errno, "malloc");
+        }
+        return sub;
+    }
+
+    // Mock free for demonstration
+    void free(void *ptr) {
+        // In a real scenario, this would call the system free.
+        // For this mock, we assume it's handled.
+    }
+
+    // Mock strdup for demonstration
+    char *strdup(const char *s) {
+        char *new_s = malloc(strlen(s) + 1);
+        if (new_s) {
+            strcpy(new_s, s);
+        }
+        return new_s;
+    }
+
+    // Mock strchr for demonstration
+    char *strchr(const char *s, int c) {
+        return strchr(s, c);
+    }
+
+    // Mock strncmp for demonstration
+    int strncmp(const char *s1, const char *s2, size_t n) {
+        return strncmp(s1, s2, n);
+    }
+
+    // Mock strcspn for demonstration
+    size_t strcspn(const char *s, const char *reject) {
+        return strcspn(s, reject);
+    }
+
+    // Mock strlen for demonstration
+    size_t strlen(const char *s) {
+        return strlen(s);
+    }
+
+    // Mock memcpy for demonstration
+    void *memcpy(void *dest, const void *src, size_t n) {
+        return memcpy(dest, src, n);
+    }
+
+    // Mock strncpy for demonstration
+    char *strncpy(char *dest, const char *src, size_t n) {
+        return strncpy(dest, src, n);
+    }
+
+    // Mock snprintf for demonstration
+    int snprintf(char *str, size_t size, const char *format, ...) {
+        // Simplified mock
+        return 0;
+    }
+
+    // Mock strcasecmp for demonstration
+    int strcasecmp(const char *s1, const char *s2) {
+        return strcasecmp(s1, s2);
+    }
+
+    // Mock pcap_parsesrcstr_ex for demonstration
+    int pcap_parsesrcstr_ex(const char *source, int *type, char *userinfo, char *host,
+        char *port, char *name, unsigned char *uses_ssl, char *errbuf) {
+        char *scheme = NULL, *tmpuserinfo = NULL, *tmphost = NULL, *tmpport = NULL, *tmppath = NULL;
+
+        if (pcap_parse_source(source, &scheme, &tmpuserinfo, &tmphost,
+            &tmpport, &tmppath, errbuf) == -1) {
+            return (-1);
+        }
+
+        if (scheme == NULL) {
+            if (name && tmppath) pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+            if (type) *type = 0; // PCAP_SRC_IFLOCAL
+            free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo);
+            return (0);
+        }
+
+        int is_rpcap = 0;
+        if (strcmp(scheme, "rpcaps") == 0) {
+            is_rpcap = 1;
+            if (uses_ssl) *uses_ssl = 1;
+        } else if (strcmp(scheme, "rpcap") == 0) {
+            is_rpcap = 1;
+        }
+
+        if (is_rpcap) {
+            if (userinfo && tmpuserinfo) pcap_strlcpy(userinfo, tmpuserinfo, PCAP_BUF_SIZE);
+            if (host && tmphost) pcap_strlcpy(host, tmphost, PCAP_BUF_SIZE);
+            if (port && tmpport) pcap_strlcpy(port, tmpport, PCAP_BUF_SIZE);
+            if (name && tmppath) pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+            if (type) *type = 1; // PCAP_SRC_IFREMOTE
+            free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo); free(scheme);
+            return (0);
+        }
+
+        if (strcmp(scheme, "file") == 0) {
+            if (name && tmppath) pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+            if (type) *type = 2; // PCAP_SRC_FILE
+            free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo); free(scheme);
+            return (0);
+        }
+
+        if (name) pcap_strlcpy(name, source, PCAP_BUF_SIZE);
+        if (type) *type = 0; // PCAP_SRC_IFLOCAL
+        free(tmppath); free(tmpport); free(tmphost); free(tmpuserinfo); free(scheme);
+        return (0);
+    }
+
+    int main() {
+        char errbuf[PCAP_BUF_SIZE];
+        char port_buffer[PCAP_BUF_SIZE];
+        int type;
+        char name_buffer[PCAP_BUF_SIZE];
+        char host_buffer[PCAP_BUF_SIZE];
+        char userinfo_buffer[PCAP_BUF_SIZE];
+        unsigned char uses_ssl;
+
+        // Violation: Using a reserved port (DNS)
+        if (pcap_parsesrcstr_ex("rpcap://example.com:53", &type, userinfo_buffer, host_buffer, port_buffer, name_buffer, &uses_ssl, errbuf) == -1) {
+            fprintf(stderr, "Error parsing source: %s\n", errbuf);
+        } else {
+            printf("Parsed source: Type=%d, Host=%s, Port=%s, Name=%s\n", type, host_buffer, port_buffer, name_buffer);
+            // In a real application, you would check if port_buffer corresponds to a reserved port
+            // and potentially disallow the connection or warn the user.
+            if (strcmp(port_buffer, "53") == 0) {
+                printf("WARNING: Reserved port (53) detected. Ensure this is intended.\n");
+            }
+        }
+
+        // Violation: Using a reserved port (Microsoft RPC)
+        if (pcap_parsesrcstr_ex("rpcap://example.com:135", &type, userinfo_buffer, host_buffer, port_buffer, name_buffer, &uses_ssl, errbuf) == -1) {
+            fprintf(stderr, "Error parsing source: %s\n", errbuf);
+        } else {
+            printf("Parsed source: Type=%d, Host=%s, Port=%s, Name=%s\n", type, host_buffer, port_buffer, name_buffer);
+            if (strcmp(port_buffer, "135") == 0) {
+                printf("WARNING: Reserved port (135) detected. Ensure this is intended.\n");
+            }
+        }
+
+        return 0;
+    }
+    ```

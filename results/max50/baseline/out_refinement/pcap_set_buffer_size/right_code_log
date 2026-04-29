@@ -1,0 +1,319 @@
+Question: 
+Given the following function `pcap_set_buffer_size` in library `libpcap`, Complete the following tasks.
+```
+int pcap_set_buffer_size(pcap_t *p, int buffer_size){
+	if (pcap_check_activated(p))
+		return (PCAP_ERROR_ACTIVATED);
+	if (buffer_size <= 0) {
+		/*
+		 * Silently ignore invalid values.
+		 */
+		return (0);
+	}
+	p->opt.buffer_size = buffer_size;
+	return (0);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_set_buffer_size success" after calling `pcap_set_buffer_size` successfully; Output: "Calling pcap_set_buffer_size fail" after the call to `pcap_set_buffer_size` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_set_buffer_size\n")
+    ```
+    before calling `pcap_set_buffer_size`. Make sure that there are no other function calls between this output and the calling to `pcap_set_buffer_size`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+## Task 1: Invocation Specification Analysis
+
+Based on the provided `pcap_set_buffer_size` function, the caller needs to follow these specifications:
+
+1.  **`pcap_t *p` must be a valid, initialized `pcap_t` handle.** The function accesses members of this structure (`p->opt.buffer_size`) and uses `pcap_check_activated(p)`. If `p` is NULL or uninitialized, it will lead to a crash (segmentation fault).
+2.  **The `pcap_t` handle must not be activated.** The very first check in the function is `if (pcap_check_activated(p))`. If the handle is already activated (e.g., by calling `pcap_open_live` and then `pcap_loop` or `pcap_next_ex`), `pcap_set_buffer_size` will return `PCAP_ERROR_ACTIVATED`. This implies that `pcap_set_buffer_size` should be called *before* activating the capture.
+3.  **`buffer_size` must be a positive integer.** The function checks `if (buffer_size <= 0)`. If it's zero or negative, the function will silently return 0 (success) without changing any settings. While it doesn't cause an error, it means the buffer size won't be set as intended.
+
+## Task 2: Complete Linux Code
+
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+int main() {
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    const char *dev = pcap_lookupdev(errbuf); // Find a suitable network device
+
+    if (dev == NULL) {
+        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Found device: %s\n", dev);
+    fflush(stdout);
+
+    // Open the network device for capturing
+    // We open it in non-promiscuous mode and with a timeout of 1000ms.
+    // The buffer size is set to 0 initially, as we'll set it using pcap_set_buffer_size.
+    handle = pcap_open_live(dev, BUFSIZ, 0, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened device %s\n", dev);
+    fflush(stdout);
+
+    // Task: Set a buffer size.
+    // The buffer size needs to be positive and the handle must not be activated.
+    // pcap_open_live creates a handle that is not yet activated in terms of capturing packets.
+    int desired_buffer_size = 1024 * 1024; // 1MB buffer size
+    int ret;
+
+    printf("before pcap_set_buffer_size\n");
+    fflush(stdout);
+
+    ret = pcap_set_buffer_size(handle, desired_buffer_size);
+
+    if (ret != 0) {
+        fprintf(stderr, "Calling pcap_set_buffer_size fail: %d\n", ret);
+        fflush(stdout);
+        // Attempt to get a more descriptive error message if available.
+        // Note: pcap_set_buffer_size itself doesn't populate errbuf on failure in this specific way.
+        // The return code is the primary indicator. PCAP_ERROR_ACTIVATED is the most likely failure here.
+        if (ret == PCAP_ERROR_ACTIVATED) {
+            fprintf(stderr, "Reason: The pcap handle was already activated.\n");
+            fflush(stdout);
+        } else {
+            fprintf(stderr, "An unexpected error occurred.\n");
+            fflush(stdout);
+        }
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_set_buffer_size success\n");
+        fflush(stdout);
+    }
+
+    // We can verify the buffer size if desired (though not strictly required by the prompt)
+    // The actual buffer size might be adjusted by the system, but this shows the set value.
+    printf("Set buffer size to: %d\n", pcap_get_buffer_size(handle));
+    fflush(stdout);
+
+    // Since the code needs to be non-interactive and no infinite loops,
+    // we will close the handle and exit.
+    // In a real application, you would likely start capturing packets here (e.g., with pcap_loop).
+
+    pcap_close(handle);
+    printf("Successfully closed pcap handle.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+int main() {
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    const char *dev = pcap_lookupdev(errbuf); // Find a suitable network device
+
+    if (dev == NULL) {
+        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Found device: %s\n", dev);
+    fflush(stdout);
+
+    // Open the network device for capturing
+    // We open it in non-promiscuous mode and with a timeout of 1000ms.
+    // The buffer size is set to 0 initially, as we'll set it using pcap_set_buffer_size.
+    handle = pcap_open_live(dev, BUFSIZ, 0, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened device %s\n", dev);
+    fflush(stdout);
+
+    // Task: Set a buffer size.
+    // The buffer size needs to be positive and the handle must not be activated.
+    // pcap_open_live creates a handle that is not yet activated in terms of capturing packets.
+    int desired_buffer_size = 1024 * 1024; // 1MB buffer size
+    int ret;
+
+    printf("before pcap_set_buffer_size\n");
+    fflush(stdout);
+
+    ret = pcap_set_buffer_size(handle, desired_buffer_size);
+
+    if (ret != 0) {
+        fprintf(stderr, "Calling pcap_set_buffer_size fail: %d\n", ret);
+        fflush(stdout);
+        // Attempt to get a more descriptive error message if available.
+        // Note: pcap_set_buffer_size itself doesn't populate errbuf on failure in this specific way.
+        // The return code is the primary indicator. PCAP_ERROR_ACTIVATED is the most likely failure here.
+        if (ret == PCAP_ERROR_ACTIVATED) {
+            fprintf(stderr, "Reason: The pcap handle was already activated.\n");
+            fflush(stdout);
+        } else {
+            fprintf(stderr, "An unexpected error occurred.\n");
+            fflush(stdout);
+        }
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_set_buffer_size success\n");
+        fflush(stdout);
+    }
+
+    // We can verify the buffer size if desired (though not strictly required by the prompt)
+    // The actual buffer size might be adjusted by the system, but this shows the set value.
+    printf("Set buffer size to: %d\n", pcap_get_buffer_size(handle));
+    fflush(stdout);
+
+    // Since the code needs to be non-interactive and no infinite loops,
+    // we will close the handle and exit.
+    // In a real application, you would likely start capturing packets here (e.g., with pcap_loop).
+
+    pcap_close(handle);
+    printf("Successfully closed pcap handle.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+False
+
+I0426 02:37:47.238073 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238815 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238839 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238842 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238844 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238847 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238849 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238851 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238853 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238856 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238858 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238859 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238862 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238864 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238866 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238868 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238870 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238872 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238874 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238876 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238878 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238880 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238882 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238884 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238886 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238888 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238890 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238892 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238893 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238895 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238897 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238899 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238901 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238903 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238905 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238907 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238910 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238912 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238914 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238915 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238917 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238919 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238921 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238923 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238925 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238927 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238929 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238930 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238932 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238934 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238936 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238938 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238940 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238941 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238943 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238945 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238947 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238949 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238951 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238953 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238955 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238957 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238958 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238960 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238962 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238964 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238966 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238968 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238970 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238972 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238974 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238975 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238979 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238981 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238982 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238984 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238986 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238988 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238990 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238992 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238994 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238996 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.238998 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.239000 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.239001 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.239003 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.239005 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.239007 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.239009 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.239012 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.239014 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.239016 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0426 02:37:47.239018 18813555 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+pcap_set_buffer_size.c: In function 'main':
+pcap_set_buffer_size.c:11:5: warning: 'pcap_lookupdev' is deprecated: use 'pcap_findalldevs' and use the first device [-Wdeprecated-declarations]
+   11 |     const char *dev = pcap_lookupdev(errbuf); // Find a suitable network device
+      |     ^~~~~
+In file included from /usr/include/pcap.h:43,
+                 from pcap_set_buffer_size.c:5:
+/usr/include/pcap/pcap.h:394:18: note: declared here
+  394 | PCAP_API char   *pcap_lookupdev(char *)
+      |                  ^~~~~~~~~~~~~~
+pcap_set_buffer_size.c:66:40: warning: implicit declaration of function 'pcap_get_buffer_size'; did you mean 'pcap_set_buffer_size'? [-Wimplicit-function-declaration]
+   66 |     printf("Set buffer size to: %d\n", pcap_get_buffer_size(handle));
+      |                                        ^~~~~~~~~~~~~~~~~~~~
+      |                                        pcap_set_buffer_size
+/usr/bin/ld: /tmp/ccgSLAbg.o: in function `main':
+/sandbox/pcap_set_buffer_size.c:66: undefined reference to `pcap_get_buffer_size'
+collect2: error: ld returned 1 exit status
+
+compile
+Break cant parse code. token_right: 19225. Token_one: 1648
+Answer: 

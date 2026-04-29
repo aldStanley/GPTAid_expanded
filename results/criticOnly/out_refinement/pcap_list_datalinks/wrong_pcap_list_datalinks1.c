@@ -1,0 +1,86 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL; // Initialize handle to NULL
+    int *dlt_list = NULL;
+    int dlt_count = 0;
+
+    // Task2.7: Placeholder for file name, not directly used in this example
+    // but adhering to the requirement if file operations were present.
+    // const char *filename = "example.pcap";
+
+    // Task2.2: Non-interactive and no infinite loops.
+    // Task2.3: Check API call status.
+    // Task2.4: Flush stdout.
+    // Task2.5: Output success/failure messages.
+    // Task2.6: Add specific printf before calling.
+
+    // VIOLATION: We are intentionally NOT opening a live capture handle.
+    // The 'handle' variable remains NULL, violating the rule that
+    // pcap_t pointer must point to an activated pcap_t instance.
+    // In the original code, pcap_open_live would activate the handle.
+
+    printf("before pcap_list_datalinks (handle is intentionally NULL)\n");
+    fflush(stdout);
+
+    // Task 1: Pass a pointer to a pointer for dlt_buffer.
+    // Task2.1: Ensure compilable and follows invocation spec.
+    // This call will now fail because 'handle' is NULL.
+    int result = pcap_list_datalinks(handle, &dlt_list);
+
+    // Task2.5: Output success/failure messages.
+    if (result >= 0) {
+        // This block should not be reached due to the violation.
+        printf("Calling pcap_list_datalinks success\n");
+        fflush(stdout);
+        dlt_count = result;
+
+        printf("Number of supported datalink types: %d\n", dlt_count);
+        fflush(stdout);
+
+        if (dlt_count > 0 && dlt_list != NULL) {
+            printf("Supported DLTs:\n");
+            fflush(stdout);
+            for (int i = 0; i < dlt_count; i++) {
+                printf("  DLT[%d]: %d (%s)\n", i, dlt_list[i], pcap_datalink_val_to_name(dlt_list[i]));
+                fflush(stdout);
+            }
+        } else {
+            printf("No DLTs listed or an unexpected state was encountered.\n");
+            fflush(stdout);
+        }
+
+        // Task 1: Caller is responsible for freeing the allocated memory.
+        free(dlt_list);
+        dlt_list = NULL; // Good practice to set to NULL after freeing
+    } else {
+        // This block is expected to be reached.
+        printf("Calling pcap_list_datalinks fail as expected due to NULL handle.\n");
+        fflush(stdout);
+        // Task2.3: Output error message inferring the cause.
+        // pcap_geterr might behave unexpectedly with a NULL handle,
+        // but we can infer the cause from the context.
+        fprintf(stderr, "pcap_list_datalinks failed. This is expected because the pcap handle was not activated (it's NULL).\n");
+        fflush(stdout);
+        // Task2.3: Return error code
+        return 123;
+    }
+
+    // Close the pcap handle
+    // This will not be reached if the error path is taken, which is expected.
+    // If it were reached, pcap_close(NULL) is generally safe.
+    if (handle) {
+        pcap_close(handle);
+    }
+
+    return 0;
+}
+

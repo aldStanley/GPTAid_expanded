@@ -1,0 +1,141 @@
+
+Question: 
+Given the following function `pcap_setfilter` in library `libpcap`, Complete the following tasks.
+```
+int pcap_setfilter(pcap_t *p, struct bpf_program *fp){
+	return (p->setfilter_op(p, fp));
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_setfilter success" after calling `pcap_setfilter` successfully; Output: "Calling pcap_setfilter fail" after the call to `pcap_setfilter` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_setfilter\n")
+    ```
+    before calling `pcap_setfilter`. Make sure that there are no other function calls between this output and the calling to `pcap_setfilter`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+
+Answer: 
+Let's break down the `pcap_setfilter` function and then construct the example code.
+
+## Task 1: Analyze the function code to find the invocation specification
+
+The provided `pcap_setfilter` function is a wrapper around an internal operation. The key to understanding the invocation specification lies in the parameters it accepts:
+
+*   `pcap_t *p`: This is a pointer to a `pcap_t` structure. This structure represents an active `pcap` session. It's typically obtained by calling `pcap_open_live` or `pcap_open_offline`. The caller must have a valid, opened `pcap` handle.
+*   `struct bpf_program *fp`: This is a pointer to a `bpf_program` structure. This structure represents a compiled Berkeley Packet Filter (BPF) program. To obtain this, the caller must first compile a filter string using `pcap_compile`.
+
+Therefore, the invocation specification for `pcap_setfilter` is:
+
+1.  **Obtain a valid `pcap_t` handle:** This is usually done by successfully calling `pcap_open_live` or `pcap_open_offline`.
+2.  **Compile a filter expression into a `bpf_program`:** This is done by successfully calling `pcap_compile`.
+3.  **Pass both the valid `pcap_t` handle and the compiled `bpf_program` to `pcap_setfilter`.**
+
+## Task 2: Generate a complete code that calls the function in Linux
+
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+
+// Function to print error messages and exit
+void print_error_and_exit(const char *message, const char *api_name) {
+    fprintf(stderr, "%s: %s - %s\n", message, api_name, pcap_geterr(NULL)); // Use NULL for general pcap errors if no handle yet
+    fflush(stdout);
+    exit(123);
+}
+
+// Helper to print error messages for pcap_open_live
+void print_pcap_open_error(const char *message, const char *device) {
+    fprintf(stderr, "%s: %s - %s\n", message, device, pcap_geterr(NULL));
+    fflush(stdout);
+    exit(123);
+}
+
+// Helper to print error messages for pcap_compile
+void print_pcap_compile_error(const char *message, const char *filter_exp) {
+    fprintf(stderr, "%s: %s - %s\n", message, filter_exp, pcap_geterr(NULL));
+    fflush(stdout);
+    exit(123);
+}
+
+// The function to be tested.
+int pcap_setfilter(pcap_t *p, struct bpf_program *fp) {
+    if (!p || !fp) {
+        fprintf(stderr, "Invalid arguments to pcap_setfilter.\n");
+        fflush(stdout);
+        return -1; // Indicate an internal error
+    }
+    return (p->setfilter_op(p, fp));
+}
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    struct bpf_program fp;
+    const char *device = NULL;
+    const char *filter_exp = "tcp port 80"; // Example filter
+
+    // 1. Find a network device (non-interactive, choose the first available)
+    device = pcap_lookupdev(errbuf);
+    if (device == NULL) {
+        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Using network device: %s\n", device);
+    fflush(stdout);
+
+    // 2. Open a live capture session
+    handle = pcap_open_live(device, BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        print_pcap_open_error("Couldn't open device", device);
+    }
+    printf("Successfully opened device for live capture.\n");
+    fflush(stdout);
+
+    // 3. Compile the filter expression
+    if (pcap_compile(handle, &fp, filter_exp, 1, 0) == -1) {
+        print_pcap_compile_error("Couldn't parse filter", filter_exp);
+    }
+    printf("Successfully compiled filter expression: %s\n", filter_exp);
+    fflush(stdout);
+
+    // 4. Set the filter
+    printf("before pcap_setfilter\n");
+    fflush(stdout);
+
+    if (pcap_setfilter(handle, &fp) == -1) {
+        // pcap_setfilter returns -1 on failure
+        fprintf(stderr, "Calling pcap_setfilter fail: %s\n", pcap_geterr(handle));
+        fflush(stdout);
+        // Cleanup before exiting
+        pcap_freecode(&fp);
+        pcap_close(handle);
+        return 123;
+    }
+
+    printf("Calling pcap_setfilter success\n");
+    fflush(stdout);
+
+    // 5. Cleanup
+    pcap_freecode(&fp);
+    pcap_close(handle);
+
+    printf("Cleanup complete.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```

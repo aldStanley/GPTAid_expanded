@@ -1,0 +1,117 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+// Define a structure that mimics pcap_t but allows us to control its members
+// for the purpose of violating the rule.
+typedef struct {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int tstamp_type_count;
+    int *tstamp_type_list; // This will be manipulated to violate the rule
+    // Other members of pcap_t are omitted for simplicity as they are not
+    // directly relevant to the rule being violated.
+} pcap_t_malformed;
+
+int main() {
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int *tstamp_types = NULL;
+    int num_types;
+
+    // Attempt to open a network device. Using "any" will try to find a suitable device.
+    // In a real-world scenario, you'd likely want to specify a device name or use pcap_findalldevs.
+    handle = pcap_open_live("any", BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening adapter: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap handle.\n");
+    fflush(stdout);
+
+    printf("before pcap_list_tstamp_types\n");
+    fflush(stdout);
+
+    // --- Violation Section ---
+    // To violate the rule "If p->tstamp_type_count is greater than 0, the pcap_t structure must have a valid tstamp_type_list member pointing to sufficient memory."
+    // We will create a malformed pcap_t_malformed structure.
+    // We will set tstamp_type_count to a value greater than 0, but set tstamp_type_list to NULL.
+    // This directly violates the condition that tstamp_type_list must point to sufficient memory if tstamp_type_count > 0.
+
+    pcap_t_malformed malformed_p;
+
+    // Initialize the error buffer.
+    strncpy(malformed_p.errbuf, "dummy error for malformed structure", sizeof(malformed_p.errbuf) - 1);
+    malformed_p.errbuf[sizeof(malformed_p.errbuf) - 1] = '\0'; // Ensure null termination
+
+    // Set tstamp_type_count to a value greater than 0.
+    // We'll set it to a small number, but the key is that it's > 0.
+    malformed_p.tstamp_type_count = 3;
+
+    // Set tstamp_type_list to NULL. This is the direct violation.
+    malformed_p.tstamp_type_list = NULL;
+
+    // Now, we cast our malformed structure to a pcap_t* to pass it to the function.
+    // This is where the actual violation occurs at runtime when pcap_list_tstamp_types
+    // attempts to access malformed_p.tstamp_type_list.
+    // The function expects a valid pointer if tstamp_type_count > 0, but it will receive NULL.
+    // This will likely lead to a crash (segmentation fault) or undefined behavior.
+
+    printf("Attempting to call pcap_list_tstamp_types with a malformed handle (tstamp_type_list = NULL, tstamp_type_count > 0)...\n");
+    fflush(stdout);
+
+    // The following call is expected to fail or crash due to the violation.
+    // We wrap it in a try-catch like structure (using setjmp/longjmp or signal handling)
+    // in a real-world scenario to gracefully handle the expected crash.
+    // For this example, we'll just let it proceed and observe the outcome.
+    // Note: In a real application, you would not intentionally cause a crash like this.
+    // This is purely for demonstrating the violation.
+
+    // The function signature is: int pcap_list_tstamp_types(pcap_t *p, int **tstamp_typesp)
+    // We are passing a pointer to our malformed structure cast to pcap_t*.
+    num_types = pcap_list_tstamp_types((pcap_t*)&malformed_p, &tstamp_types);
+
+    // --- End of Violation Section ---
+
+    // The code below this point might not be reached if the violation causes a crash.
+    // However, we include it to show how the success/failure would normally be handled.
+
+    if (num_types < 0) {
+        // If the function returns an error code, it might be due to the violation.
+        // The errbuf might contain information, but it's from the malformed structure.
+        fprintf(stderr, "Calling pcap_list_tstamp_types failed (as expected due to violation): %s\n", malformed_p.errbuf);
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    } else {
+        // This branch is unlikely to be reached if the violation causes a crash or error.
+        printf("Calling pcap_list_tstamp_types succeeded (unexpectedly, or violation did not manifest as an error code).\n");
+        fflush(stdout);
+
+        if (tstamp_types != NULL) {
+            printf("Supported timestamp types: %d\n", num_types);
+            fflush(stdout);
+            for (int i = 0; i < num_types; i++) {
+                printf("Type %d: %d\n", i + 1, tstamp_types[i]);
+                fflush(stdout);
+            }
+            free(tstamp_types);
+            tstamp_types = NULL;
+        } else {
+            printf("No timestamp types returned, but call was successful.\n");
+            fflush(stdout);
+        }
+    }
+
+    // Close the pcap handle.
+    pcap_close(handle);
+    printf("Pcap handle closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+

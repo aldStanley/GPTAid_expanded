@@ -1,0 +1,136 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Define PCAP_ERRBUF_SIZE if it's not already defined by pcap.h
+// This is a common size used in libpcap examples.
+#ifndef PCAP_ERRBUF_SIZE
+#define PCAP_ERRBUF_SIZE 256
+#endif
+
+int main() {
+    int err_code_to_test_success = 0; // A common "success" error code (e.g., no error)
+    int err_code_to_test_fail = 999;  // A likely invalid error code to test the "Unknown error" path
+
+    char *error_message_success = NULL;
+    char *error_message_fail = NULL;
+
+    // --- Test Case 1: Simulating a successful conversion ---
+    printf("before pcap_strerror\n");
+    fflush(stdout);
+    error_message_success = pcap_strerror(err_code_to_test_success);
+
+    if (error_message_success != NULL) {
+        printf("Calling pcap_strerror success\n");
+        fflush(stdout);
+        printf("Error message for code %d: %s\n", err_code_to_test_success, error_message_success);
+        fflush(stdout);
+    } else {
+        // In libpcap's pcap_strerror, NULL return is not expected based on the provided code.
+        // This branch is more for theoretical completeness or if the library implementation changes.
+        fprintf(stderr, "Unexpected NULL return from pcap_strerror for code %d.\n", err_code_to_test_success);
+        fflush(stderr);
+        return 123;
+    }
+
+    // --- Test Case 2: Simulating a failed conversion (invalid error code) ---
+    printf("before pcap_strerror\n");
+    fflush(stdout);
+    error_message_fail = pcap_strerror(err_code_to_test_fail);
+
+    // The pcap_strerror function always returns a string, even for unknown codes.
+    // The "failure" here is that the string itself indicates an unknown error.
+    // The invocation specification implies that we should check the *content* of the returned string
+    // if we are uncertain about the errnum. However, pcap_strerror itself doesn't signal failure.
+    // For the purpose of this task, we'll assume "failure" means the errnum was out of expected bounds.
+
+    if (error_message_fail != NULL) {
+        // We will consider it a "success" in terms of pcap_strerror *running*
+        // but the *output message* might indicate an issue.
+        printf("Calling pcap_strerror success\n");
+        fflush(stdout);
+        printf("Error message for code %d: %s\n", err_code_to_test_fail, error_message_fail);
+        fflush(stdout);
+        // If the message indicates an unknown error, we could infer a problem with errnum.
+        // For this task, we'll assume the *function call itself* was successful in running.
+        // If the requirement was to check if the *error message itself* was meaningful,
+        // we would need to parse the returned string.
+    } else {
+        // This path is not expected based on the provided pcap_strerror implementation.
+        fprintf(stderr, "Unexpected NULL return from pcap_strerror for code %d.\n", err_code_to_test_fail);
+        fflush(stderr);
+        return 123;
+    }
+
+    // Example of a pcap API that *does* return an error code that pcap_strerror can translate.
+    // This requires a network interface. If no interface is available, this will fail.
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+
+    printf("Attempting to open a network device for demonstration...\n");
+    fflush(stdout);
+
+    // Attempt to open the first available network device.
+    // This will likely fail if run in an environment without network interfaces or privileges.
+    // The error returned by pcap_open_live can then be translated by pcap_strerror.
+    handle = pcap_open_live("eth0", BUFSIZ, 1, 1000, errbuf); // Using "eth0" as a common interface name
+
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to open network device: %s\n", errbuf);
+        fflush(stderr);
+
+        // Now, let's try to get an error string for a *specific* libpcap error code.
+        // The errbuf content might not directly map to a simple integer errno.
+        // However, many pcap errors are related to system errors or have specific codes.
+        // For demonstration, let's assume a hypothetical error code that might occur.
+        // A common scenario for pcap_open_live failure is insufficient privileges.
+        // Let's use a common system error code like EPERM (Operation not permitted) if we can.
+        // If pcap_open_live returned a specific libpcap internal error number, we would use that.
+        // Since we only have errbuf, let's try to get a system error string if possible.
+        // If no network device is found, the errbuf will contain a descriptive message.
+        // To use pcap_strerror effectively here, we'd ideally have an integer error code
+        // from a failed pcap function.
+        // Let's simulate passing a common system error code if we can't get a direct pcap error code.
+        // Note: The provided pcap_strerror implementation relies on system's errno or similar.
+
+        // If pcap_open_live fails, it populates errbuf. The error codes are not always direct integers
+        // that can be passed to pcap_strerror without mapping.
+        // For a robust test, we'd need to catch a specific pcap error code.
+        // Since we're focusing on pcap_strerror usage, let's try to translate a known system error.
+
+        // A common error for not having root privileges is EPERM (1).
+        // We need to ensure this is part of sys_errlist or handled by pcap_strerror.
+        // Let's use a highly unlikely large number to test the "unknown error" case from pcap_strerror again.
+        int hypothetical_pcap_error_code = 51234; // A value unlikely to be in sys_errlist
+
+        printf("before pcap_strerror\n");
+        fflush(stdout);
+        char *hypothetical_error_string = pcap_strerror(hypothetical_pcap_error_code);
+
+        if (hypothetical_error_string != NULL) {
+            printf("Calling pcap_strerror success\n");
+            fflush(stdout);
+            printf("Hypothetical error message for code %d: %s\n", hypothetical_pcap_error_code, hypothetical_error_string);
+            fflush(stdout);
+        } else {
+            fprintf(stderr, "Unexpected NULL return from pcap_strerror for hypothetical code %d.\n", hypothetical_pcap_error_code);
+            fflush(stderr);
+            return 123;
+        }
+
+        // If pcap_open_live failed, we can return 123.
+        return 123;
+    } else {
+        printf("Successfully opened network device (this might not be expected if not root).\n");
+        fflush(stdout);
+        pcap_close(handle); // Close the handle if it was successfully opened
+    }
+
+    printf("Program finished.\n");
+    fflush(stdout);
+    return 0;
+}
+

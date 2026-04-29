@@ -1,0 +1,54 @@
+## Likelihood-Based Analysis of `pcap_set_tstamp_type` Error
+
+**1. Key Differences Between Correct and Error API Calls:**
+
+The primary difference lies in the *state* of the `pcap_t` handle when `pcap_set_tstamp_type` is called.
+
+*   **Correct Code (Info 1):**
+    *   `pcap_set_tstamp_type` is called on a `handle` that has been opened using `pcap_open_live` but *before* any packet capturing has commenced (e.g., `pcap_loop` or `pcap_dispatch` has not been called).
+    *   The `pcap_t` handle's internal `activated` state is implicitly `0` (or not activated).
+
+*   **Error Code (Info 2):**
+    *   `pcap_set_tstamp_type` is called on a `activated_handle_ptr`, which is explicitly cast from a `pcap_simulated_handle_t` where the `activated` flag is set to `1`.
+    *   This simulates calling `pcap_set_tstamp_type` on a `pcap_t` handle that is already activated for packet capture.
+
+**2. Possible Status of the Parameter in the Correct Code (Info 1):**
+
+The `pcap_t *handle` parameter.
+*   **Status:** The handle is in a **pre-activation state**. It has been opened but packet capture has not yet started.
+
+**3. Possible Status of the Parameter in the Error Code (Info 2):**
+
+The `pcap_t *activated_handle_ptr` parameter.
+*   **Status:** The handle is in an **activated state**. Packet capture is either in progress or has been initiated.
+
+**4. Potential Root Cause of the Error Based on Error Results (Info 3):**
+
+The "Error Results of the Run" section (Info 3) indicates a `sudo` error related to password attempts. This is **completely unrelated** to the `pcap_set_tstamp_type` function itself. The output in Info 3 suggests that the program was likely run with `sudo` and failed due to incorrect password entry, or perhaps an attempt to run without elevated privileges where they are required for network device access.
+
+However, focusing *solely* on the behavior demonstrated by the C code snippets (Info 1 and Info 2) concerning `pcap_set_tstamp_type`, the root cause of the error *within the context of the pcap library's API design* is attempting to modify the timestamp type on an **already activated capture handle**.
+
+**5. Evaluation of Probability of Primary Root Cause:**
+
+Given the structure of Info 2, the explicit simulation of an activated handle and the subsequent call to `pcap_set_tstamp_type` is the direct cause of the *intended* error demonstration in the code. The `sudo` output is a red herring in analyzing the `pcap_set_tstamp_type` function's behavior.
+
+*   **Attempting to set `tstamp_type` on an activated capture handle:** This is the **most probable cause** for an error related to the `pcap_set_tstamp_type` function itself, as it directly targets the function's documented limitations. The `pcap_set_tstamp_type` function is designed to be called *before* packet capture begins.
+
+**6. Ranking of Causes:**
+
+1.  **Attempting to set `tstamp_type` on an activated capture handle:** (Highest Likelihood) - This is directly demonstrated in Info 2 as a violation.
+
+**7. Parameter Analysis Related to Root Cause:**
+
+The root cause identified above relates to the `pcap_t *p` parameter.
+
+*   **Parameter Index:** 1
+*   **Parameter Name:** `p`
+
+**8. Security Rules:**
+
+Based on the most probable cause: attempting to set `tstamp_type` on an activated capture handle.
+
+**A. Security Rule AUTO:** "Parameter 1: The caller MUST ensure that the `pcap_t` handle is not activated for packet capture (i.e., `pcap_loop`, `pcap_dispatch`, or similar functions have not been called) before invoking `pcap_set_tstamp_type`. The caller SHOULD check the activation status of the handle if such a mechanism is available, or ensure the call is made logically before initiating capture."
+
+**B. Security Rule AUTO_AVOID:** "Parameter 1: The caller MUST NOT invoke `pcap_set_tstamp_type` on a `pcap_t` handle that is already activated for packet capture."

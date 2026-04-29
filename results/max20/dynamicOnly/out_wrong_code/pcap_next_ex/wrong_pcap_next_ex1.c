@@ -1,0 +1,174 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+
+// Define a placeholder for a typical interface name for live capture
+// You might need to change this based on your system's available interfaces
+#define DEFAULT_INTERFACE "eth0"
+// Define a placeholder for an offline capture file.
+// This file should exist for the offline capture part of the example.
+// If it doesn't exist, the offline open will fail.
+#define OFFLINE_FILE_NAME "example.pcap"
+
+int main() {
+    pcap_t *handle_live = NULL;
+    pcap_t *handle_offline = NULL;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    struct pcap_pkthdr *header = NULL;
+    const u_char *packet = NULL;
+    int packet_count = 0;
+    int ret_live, ret_offline;
+
+    // --- Live Capture Example ---
+    printf("Attempting to open interface for live capture...\n");
+    fflush(stdout);
+
+    // Open the live capture device
+    // For a live capture, we need a timeout to avoid blocking indefinitely
+    handle_live = pcap_open_live(DEFAULT_INTERFACE, BUFSIZ, 1, 1000, errbuf);
+    if (handle_live == NULL) {
+        fprintf(stderr, "Couldn't open device %s: %s\n", DEFAULT_INTERFACE, errbuf);
+        fflush(stderr);
+        goto cleanup_and_exit;
+    }
+    printf("Successfully opened interface %s for live capture.\n", DEFAULT_INTERFACE);
+    fflush(stdout);
+
+    // --- Call pcap_next_ex for live capture ---
+    printf("before pcap_next_ex (live capture)\n");
+    fflush(stdout);
+
+    // We expect only one packet or a timeout
+    ret_live = pcap_next_ex(handle_live, &header, &packet);
+
+    if (ret_live > 0) {
+        printf("Calling pcap_next_ex success (live capture)\n");
+        fflush(stdout);
+        packet_count++;
+        // In a real application, you would process the packet here
+        printf("Packet captured: %u bytes\n", header->len);
+        fflush(stdout);
+    } else if (ret_live == 0) {
+        printf("Calling pcap_next_ex: Timeout occurred (live capture)\n");
+        fflush(stdout);
+    } else { // ret_live == -1 or ret_live == -2 (though -2 is unlikely for live)
+        fprintf(stderr, "Calling pcap_next_ex fail (live capture): %s\n", pcap_geterr(handle_live));
+        fflush(stderr);
+        // Returning 123 as per requirements
+        pcap_close(handle_live);
+        return 123;
+    }
+
+    // Close the live handle early as we're done with live capture for this example
+    pcap_close(handle_live);
+    handle_live = NULL; // Good practice to NULL pointers after closing
+
+    // --- Offline Capture Example ---
+    printf("\nAttempting to open file for offline capture...\n");
+    fflush(stdout);
+
+    // Open the capture file for offline reading
+    handle_offline = pcap_open_offline(OFFLINE_FILE_NAME, errbuf);
+    if (handle_offline == NULL) {
+        fprintf(stderr, "Couldn't open file %s: %s\n", OFFLINE_FILE_NAME, errbuf);
+        fflush(stderr);
+        // If the file doesn't exist, this is expected for a simple example.
+        // We'll continue to show the structure, but this part might fail if the file is missing.
+        // For a robust example, you'd create a dummy file.
+        // However, the requirement is to *call* it, so we proceed.
+        printf("Skipping offline capture attempt due to file opening failure.\n");
+        fflush(stdout);
+    } else {
+        printf("Successfully opened file %s for offline capture.\n", OFFLINE_FILE_NAME);
+        fflush(stdout);
+
+        // --- Call pcap_next_ex for offline capture ---
+        printf("before pcap_next_ex (offline capture)\n");
+        fflush(stdout);
+
+        // We expect only one packet or EOF
+        ret_offline = pcap_next_ex(handle_offline, &header, &packet);
+
+        if (ret_offline > 0) {
+            printf("Calling pcap_next_ex success (offline capture)\n");
+            fflush(stdout);
+            packet_count++;
+            // In a real application, you would process the packet here
+            printf("Packet read from file: %u bytes\n", header->len);
+            fflush(stdout);
+        } else if (ret_offline == -2) { // EOF in offline capture
+            printf("Calling pcap_next_ex: End of file reached (offline capture)\n");
+            fflush(stdout);
+        } else if (ret_offline == 0) { // This should not happen for offline with pcap_next_ex returning -2 for EOF, but good to check.
+            fprintf(stderr, "Calling pcap_next_ex unexpected return 0 for offline capture. (Might indicate file corruption or a specific libpcap version behavior).\n");
+            fflush(stderr);
+        }
+        else { // ret_offline == -1
+            fprintf(stderr, "Calling pcap_next_ex fail (offline capture): %s\n", pcap_geterr(handle_offline));
+            fflush(stderr);
+            // Returning 123 as per requirements
+            pcap_close(handle_offline);
+            return 123;
+        }
+
+        // Close the offline handle
+        pcap_close(handle_offline);
+        handle_offline = NULL; // Good practice to NULL pointers after closing
+    }
+
+    // --- VIOLATION: Call pcap_next_ex with a NULL pcap_t pointer ---
+    printf("\n--- Demonstrating violation: Calling pcap_next_ex with NULL pcap_t ---\n");
+    fflush(stdout);
+
+    pcap_t *null_handle = NULL; // Explicitly create a NULL pointer
+    struct pcap_pkthdr *violation_header = NULL;
+    const u_char *violation_packet = NULL;
+
+    printf("Calling pcap_next_ex with a NULL handle...\n");
+    fflush(stdout);
+
+    // This call will cause a NULL pointer dereference.
+    // The return value of pcap_next_ex when passed a NULL handle is typically -1,
+    // and pcap_geterr() might return an error message indicating an invalid handle.
+    int violation_ret = pcap_next_ex(null_handle, &violation_header, &violation_packet);
+
+    if (violation_ret == -1) {
+        fprintf(stderr, "Calling pcap_next_ex with NULL handle resulted in an error (as expected).\n");
+        fflush(stderr);
+        // In a real scenario, pcap_geterr(null_handle) would likely crash or behave unexpectedly
+        // because null_handle is NULL. We avoid calling it here to prevent further issues.
+        // The violation itself is the call with the NULL pointer.
+    } else {
+        // This branch is unlikely but included for completeness.
+        fprintf(stderr, "Calling pcap_next_ex with NULL handle returned %d (unexpected).\n", violation_ret);
+        fflush(stderr);
+    }
+    printf("--- Violation demonstration complete ---\n");
+    fflush(stdout);
+    // --- End of VIOLATION ---
+
+
+cleanup_and_exit:
+    // Ensure handles are closed even if errors occurred
+    if (handle_live != NULL) {
+        pcap_close(handle_live);
+        printf("Live handle closed.\n");
+        fflush(stdout);
+    }
+    if (handle_offline != NULL) {
+        pcap_close(handle_offline);
+        printf("Offline handle closed.\n");
+        fflush(stdout);
+    }
+
+    printf("Total packets processed in example (before violation): %d\n", packet_count);
+    fflush(stdout);
+
+    return 0;
+}
+

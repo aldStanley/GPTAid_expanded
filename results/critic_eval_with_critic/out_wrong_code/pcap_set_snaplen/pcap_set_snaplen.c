@@ -1,0 +1,112 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+
+int main() {
+    pcap_t *handle = NULL;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int snaplen_value = 1024; // Example snapshot length
+    pcap_if_t *alldevs;
+    pcap_if_t *dev;
+    char *dev_name = NULL;
+
+    // 1. Initialize pcap handle
+    // To ensure the code is compilable and runnable without user interaction or specific device availability,
+    // we will try to find a default device or any available device.
+    // If no devices are found, we will report an error and exit.
+
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        fprintf(stderr, "Error finding all devices: %s\n", errbuf);
+        fflush(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    if (alldevs == NULL) {
+        fprintf(stderr, "No network devices found.\n");
+        fflush(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    // Try to get the first device as the default
+    dev = alldevs;
+    dev_name = dev->name;
+
+    // Open a pcap handle on the found device
+    handle = pcap_open_live(dev_name, BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap handle on device %s: %s\n", dev_name, errbuf);
+        fflush(stderr);
+        pcap_freealldevs(alldevs); // Free the list of devices
+        exit(EXIT_FAILURE);
+    }
+    printf("Successfully opened pcap handle on device: %s\n", dev_name);
+    fflush(stdout);
+
+    // Free the list of devices now that we have a handle
+    pcap_freealldevs(alldevs);
+
+
+    // The error "implicit declaration of function 'pcap_is_activated'" indicates
+    // that pcap_is_activated is not a standard libpcap function or is not
+    // available in the linked version.
+    // The pcap_set_snaplen function itself checks for activation internally using
+    // pcap_check_activated. We do not need to explicitly call pcap_is_activated
+    // before calling pcap_set_snaplen.
+    // The check `pcap_check_activated(p)` inside pcap_set_snaplen is what enforces
+    // the "before activation" rule.
+
+    // Task2: Generate a complete code that calls the function in Linux.
+    // The code needs to meet the following requirements:
+
+    // 6. Add line: printf("before pcap_set_snaplen\n") before calling pcap_set_snaplen.
+    // Make sure that there are no other function calls between this output and the calling to pcap_set_snaplen.
+    printf("before pcap_set_snaplen\n");
+    fflush(stdout);
+
+    // Call pcap_set_snaplen
+    int set_snaplen_result = pcap_set_snaplen(handle, snaplen_value);
+
+    // 5. Output: "Calling pcap_set_snaplen success" after calling pcap_set_snaplen successfully;
+    // Output: "Calling pcap_set_snaplen fail" after the call to pcap_set_snaplen has failed
+    if (set_snaplen_result == 0) {
+        printf("Calling pcap_set_snaplen success\n");
+        fflush(stdout);
+    } else {
+        // 3. If API call fails, return 123 and output error message to infer the cause of the error.
+        fprintf(stderr, "Calling pcap_set_snaplen fail. Error code: %d. ", set_snaplen_result);
+        fflush(stderr);
+        // Get specific error message from libpcap if available
+        fprintf(stderr, "libpcap error: %s\n", pcap_geterr(handle));
+        fflush(stderr);
+        // The error PCAP_ERROR_ACTIVATED (-1) is returned if the handle is already activated.
+        pcap_close(handle);
+        return 123;
+    }
+
+    // Task 1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+    // Analysis of pcap_set_snaplen:
+    // - The function takes two arguments: `pcap_t *p` (a pointer to an initialized pcap handle)
+    //   and `int snaplen` (the desired snapshot length).
+    // - The primary invocation specification is that the pcap handle `p` must NOT be activated.
+    //   The function explicitly checks this using `pcap_check_activated(p)`.
+    // - If the handle is activated, it returns `PCAP_ERROR_ACTIVATED` (-1).
+    // - If the handle is not activated, it sets `p->snapshot` to the provided `snaplen` value
+    //   and returns 0 on success.
+    // - Therefore, the caller must ensure that `pcap_set_snaplen` is called *before*
+    //   `pcap_activate` (or any other operation that implicitly activates the handle).
+    // - The `snaplen` value itself can be any integer, but it's typically a positive value
+    //   representing the number of bytes to capture per packet.
+
+    // Clean up
+    pcap_close(handle);
+    printf("Pcap handle closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+

@@ -1,0 +1,204 @@
+Question: 
+Given the following function `pcap_open_dead_with_tstamp_precision` in library `libpcap`, Complete the following tasks.
+```
+pcap_t *
+pcap_open_dead_with_tstamp_precision(int linktype, int snaplen, u_int precision){
+	pcap_t *p;
+
+	switch (precision) {
+
+	case PCAP_TSTAMP_PRECISION_MICRO:
+	case PCAP_TSTAMP_PRECISION_NANO:
+		break;
+
+	default:
+		/*
+		 * This doesn't really matter, but we don't have any way
+		 * to report particular errors, so the only failure we
+		 * should have is a memory allocation failure.  Just
+		 * pick microsecond precision.
+		 */
+		precision = PCAP_TSTAMP_PRECISION_MICRO;
+		break;
+	}
+	p = malloc(sizeof(*p));
+	if (p == NULL)
+		return NULL;
+	memset (p, 0, sizeof(*p));
+	p->snapshot = snaplen;
+	p->linktype = linktype;
+	p->opt.tstamp_precision = precision;
+	p->can_set_rfmon_op = pcap_can_set_rfmon_dead;
+	p->read_op = pcap_read_dead;
+	p->inject_op = pcap_inject_dead;
+	p->setfilter_op = pcap_setfilter_dead;
+	p->setdirection_op = pcap_setdirection_dead;
+	p->set_datalink_op = pcap_set_datalink_dead;
+	p->getnonblock_op = pcap_getnonblock_dead;
+	p->setnonblock_op = pcap_setnonblock_dead;
+	p->stats_op = pcap_stats_dead;
+#ifdef _WIN32
+	p->stats_ex_op = pcap_stats_ex_dead;
+	p->setbuff_op = pcap_setbuff_dead;
+	p->setmode_op = pcap_setmode_dead;
+	p->setmintocopy_op = pcap_setmintocopy_dead;
+	p->getevent_op = pcap_getevent_dead;
+	p->oid_get_request_op = pcap_oid_get_request_dead;
+	p->oid_set_request_op = pcap_oid_set_request_dead;
+	p->sendqueue_transmit_op = pcap_sendqueue_transmit_dead;
+	p->setuserbuffer_op = pcap_setuserbuffer_dead;
+	p->live_dump_op = pcap_live_dump_dead;
+	p->live_dump_ended_op = pcap_live_dump_ended_dead;
+	p->get_airpcap_handle_op = pcap_get_airpcap_handle_dead;
+#endif
+	p->breakloop_op = pcap_breakloop_dead;
+	p->cleanup_op = pcap_cleanup_dead;
+
+	/*
+	 * A "dead" pcap_t never requires special BPF code generation.
+	 */
+	p->bpf_codegen_flags = 0;
+
+	p->activated = 1;
+	return (p);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_open_dead_with_tstamp_precision success" after calling `pcap_open_dead_with_tstamp_precision` successfully; Output: "Calling pcap_open_dead_with_tstamp_precision fail" after the call to `pcap_open_dead_with_tstamp_precision` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_open_dead_with_tstamp_precision\n")
+    ```
+    before calling `pcap_open_dead_with_tstamp_precision`. Make sure that there are no other function calls between this output and the calling to `pcap_open_dead_with_tstamp_precision`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+## Task 1: Invocation Specification for `pcap_open_dead_with_tstamp_precision`
+
+The `pcap_open_dead_with_tstamp_precision` function in `libpcap` is designed to create a "dead" packet capture handle. This means it doesn't interact with any live network interfaces or pcap files. Instead, it's a utility function to create a `pcap_t` structure with specific initializations, often used for testing or internal `libpcap` operations where a real capture handle is not available or needed.
+
+The invocation specification for `pcap_open_dead_with_tstamp_precision` is as follows:
+
+*   **`linktype`**: This parameter specifies the data link layer type of the packets that this "dead" handle will conceptually represent. It should be a valid `DLT_` (Data Link Type) constant defined in `pcap.h`. Examples include `DLT_EN10MB` (Ethernet), `DLT_LINUX_SLL` (Linux cooked mode capture), etc. The function itself doesn't validate this value beyond assigning it, but subsequent operations might rely on it being a meaningful type.
+
+*   **`snaplen`**: This parameter specifies the snapshot length, which is the maximum number of bytes to capture from each packet. For a "dead" handle, this value is simply stored and doesn't have an immediate practical effect on packet capturing since no packets are actually captured. It should be a non-negative integer.
+
+*   **`precision`**: This parameter specifies the desired timestamp precision. It must be one of the following predefined constants:
+    *   `PCAP_TSTAMP_PRECISION_MICRO`: For microsecond precision.
+    *   `PCAP_TSTAMP_PRECISION_NANO`: For nanosecond precision.
+    If an invalid `precision` value is provided, the function will default to `PCAP_TSTAMP_PRECISION_MICRO`.
+
+**Return Value:**
+
+*   On success, it returns a pointer to a newly allocated `pcap_t` structure.
+*   On failure (specifically, if `malloc` fails), it returns `NULL`.
+
+**Key characteristics of a "dead" handle created by this function:**
+
+*   It does not open any network device or file.
+*   Most of the `pcap_t` members are initialized to point to "dead" handler functions (e.g., `pcap_read_dead`, `pcap_inject_dead`, `pcap_cleanup_dead`), which typically do nothing or simulate the expected behavior without actual I/O.
+*   The `activated` field is set to 1, indicating that the handle is considered "activated" for its intended purpose as a dead handle.
+
+## Task 2: Complete Code Example
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pcap.h>
+
+int main() {
+    pcap_t *handle;
+    int linktype = DLT_EN10MB; // Example: Ethernet link type
+    int snaplen = 65535;      // Example: Maximum snapshot length
+    u_int precision = PCAP_TSTAMP_PRECISION_MICRO; // Example: Microsecond precision
+
+    // Add the required printf before calling the function
+    printf("before pcap_open_dead_with_tstamp_precision\n");
+    fflush(stdout);
+
+    handle = pcap_open_dead_with_tstamp_precision(linktype, snaplen, precision);
+
+    if (handle == NULL) {
+        // The function itself doesn't provide specific error messages for invalid precision,
+        // it defaults to microsecond precision. The only reported failure is memory allocation.
+        // For a more informative error, one might check if malloc failed prior to this call,
+        // but in this context, we assume pcap_open_dead_with_tstamp_precision is the only
+        // relevant API failing here.
+        fprintf(stderr, "Calling pcap_open_dead_with_tstamp_precision fail: Memory allocation failed.\n");
+        fflush(stderr);
+        return 123;
+    } else {
+        printf("Calling pcap_open_dead_with_tstamp_precision success\n");
+        fflush(stdout);
+    }
+
+    // Clean up the allocated pcap_t structure.
+    // Even though it's a "dead" handle, it was allocated with malloc, so it needs cleanup.
+    pcap_close(handle);
+    printf("pcap_close called for the dead handle.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+int main() {
+    pcap_t *handle;
+    int linktype = DLT_EN10MB; // Example: Ethernet link type
+    int snaplen = 65535;      // Example: Maximum snapshot length
+    u_int precision = PCAP_TSTAMP_PRECISION_MICRO; // Example: Microsecond precision
+
+    // Add the required printf before calling the function
+    printf("before pcap_open_dead_with_tstamp_precision\n");
+    fflush(stdout);
+
+    handle = pcap_open_dead_with_tstamp_precision(linktype, snaplen, precision);
+
+    if (handle == NULL) {
+        // The function itself doesn't provide specific error messages for invalid precision,
+        // it defaults to microsecond precision. The only reported failure is memory allocation.
+        // For a more informative error, one might check if malloc failed prior to this call,
+        // but in this context, we assume pcap_open_dead_with_tstamp_precision is the only
+        // relevant API failing here.
+        fprintf(stderr, "Calling pcap_open_dead_with_tstamp_precision fail: Memory allocation failed.\n");
+        fflush(stderr);
+        return 123;
+    } else {
+        printf("Calling pcap_open_dead_with_tstamp_precision success\n");
+        fflush(stdout);
+    }
+
+    // Clean up the allocated pcap_t structure.
+    // Even though it's a "dead" handle, it was allocated with malloc, so it needs cleanup.
+    pcap_close(handle);
+    printf("pcap_close called for the dead handle.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+True
+before pcap_open_dead_with_tstamp_precision
+Calling pcap_open_dead_with_tstamp_precision success
+pcap_close called for the dead handle.
+
+
+run

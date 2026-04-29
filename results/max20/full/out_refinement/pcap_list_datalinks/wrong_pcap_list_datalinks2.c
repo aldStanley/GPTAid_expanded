@@ -1,0 +1,97 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+
+// Function to print error messages with flushing
+void print_and_flush(const char *message) {
+    printf("%s\n", message);
+    fflush(stdout);
+}
+
+int main() {
+    pcap_t *handle = NULL; // Initialize handle to NULL
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int *dlt_list = NULL;
+    int num_datalinks = 0;
+    const char *device = pcap_lookupdev(errbuf); // Get a default device
+
+    if (device == NULL) {
+        print_and_flush("Error finding default device: ");
+        print_and_flush(errbuf);
+        return 123;
+    }
+
+    // Open a live capture handle
+    handle = pcap_open_live(device, BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        print_and_flush("Error opening interface: ");
+        print_and_flush(errbuf);
+        return 123;
+    }
+    print_and_flush("Successfully opened pcap handle.");
+
+    // --- Calling pcap_list_datalinks ---
+    printf("before pcap_list_datalinks\n");
+    fflush(stdout);
+
+    // VIOLATION: Pass a NULL pcap_t pointer to pcap_list_datalinks
+    num_datalinks = pcap_list_datalinks(NULL, &dlt_list);
+
+    // The original code checked for num_datalinks < 0.
+    // The violation example shows checking for PCAP_ERROR_NOT_ACTIVATED or < 0.
+    // Since we are passing NULL, we expect a negative return value.
+    if (num_datalinks < 0) {
+        print_and_flush("Calling pcap_list_datalinks fail with NULL handle.");
+        // Note: pcap_geterr(NULL) might behave unexpectedly or crash.
+        // The error message here is generic as we can't get specific error from NULL handle.
+        print_and_flush("pcap_list_datalinks error: Cannot get error message from a NULL handle.");
+        // We don't close the handle here because it was never successfully opened in the context of the violation.
+        // However, in a real scenario where handle might be NULL for other reasons,
+        // you'd need careful error handling. For this specific violation,
+        // we are intentionally passing NULL to the function.
+        // If handle was successfully opened before this point, it should be closed.
+        if (handle != NULL) {
+            pcap_close(handle);
+            print_and_flush("Pcap handle closed (was opened before the violation).");
+        }
+        return 123;
+    } else {
+        // This branch is unlikely to be hit when passing NULL, but included for completeness
+        // based on the original code's structure.
+        print_and_flush("Calling pcap_list_datalinks success (unexpected with NULL handle).");
+    }
+    // --- End of pcap_list_datalinks call ---
+
+    // The following code would only execute if num_datalinks was not negative,
+    // which is not expected when passing a NULL handle.
+    if (num_datalinks > 0 && dlt_list != NULL) {
+        printf("Number of supported datalinks: %d\n", num_datalinks);
+        fflush(stdout);
+        printf("Supported DLTs:\n");
+        fflush(stdout);
+        for (int i = 0; i < num_datalinks; ++i) {
+            printf("  DLT: %d (%s)\n", dlt_list[i], pcap_datalink_val_to_name(dlt_list[i]));
+            fflush(stdout);
+        }
+        // Free the allocated buffer
+        free(dlt_list);
+        dlt_list = NULL; // Set to NULL to avoid dangling pointer
+    } else if (num_datalinks == 0) {
+        printf("No datalinks reported, which might indicate platform limitations.\n");
+        fflush(stdout);
+    }
+
+    // Close the pcap handle if it was successfully opened
+    if (handle != NULL) {
+        pcap_close(handle);
+        print_and_flush("Pcap handle closed.");
+    }
+
+    return 0;
+}
+

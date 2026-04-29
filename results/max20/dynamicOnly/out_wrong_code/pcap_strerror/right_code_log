@@ -1,0 +1,459 @@
+Question: 
+Given the following function `pcap_strerror` in library `libpcap`, Complete the following tasks.
+```
+char *
+pcap_strerror(int errnum){
+#ifdef HAVE_STRERROR
+#ifdef _WIN32
+	static thread_local char errbuf[PCAP_ERRBUF_SIZE];
+	errno_t err = strerror_s(errbuf, PCAP_ERRBUF_SIZE, errnum);
+
+	if (err != 0) /* err = 0 if successful */
+		pcap_strlcpy(errbuf, "strerror_s() error", PCAP_ERRBUF_SIZE);
+	return (errbuf);
+#else
+	return (strerror(errnum));
+#endif /* _WIN32 */
+#else
+	extern int sys_nerr;
+	extern const char *const sys_errlist[];
+	static thread_local char errbuf[PCAP_ERRBUF_SIZE];
+
+	if ((unsigned int)errnum < sys_nerr)
+		return ((char *)sys_errlist[errnum]);
+	(void)snprintf(errbuf, sizeof errbuf, "Unknown error: %d", errnum);
+	return (errbuf);
+#endif
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_strerror success" after calling `pcap_strerror` successfully; Output: "Calling pcap_strerror fail" after the call to `pcap_strerror` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_strerror\n")
+    ```
+    before calling `pcap_strerror`. Make sure that there are no other function calls between this output and the calling to `pcap_strerror`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+**Task 1: Invocation Specification Analysis**
+
+The `pcap_strerror` function takes a single integer argument, `errnum`, which represents the error number. The caller needs to provide a valid error number that corresponds to an error reported by the libpcap library or the underlying operating system.
+
+Here's a breakdown of the invocation:
+
+*   **Argument:** `int errnum`
+    *   This argument is the numerical representation of an error.
+    *   Valid `errnum` values are typically obtained from other libpcap functions that return an error code, or from standard system error codes.
+
+*   **Return Value:** `char *`
+    *   The function returns a pointer to a null-terminated string describing the error.
+    *   **Important Note:** The returned string is managed internally by `pcap_strerror`. In the `_WIN32` case, it's a `static thread_local` buffer, and in the non-`_WIN32` case (without `HAVE_STRERROR`), it uses `sys_errlist` which is generally a global array, and a `static thread_local` buffer for unknown errors. **The caller should not attempt to free or modify this returned string.** The string is valid until the next call to `pcap_strerror` or until the program exits.
+
+**Task 2: Complete Code for Linux**
+
+```c
+#include <stdio.h>
+#include <pcap.h>
+#include <errno.h> // For errno
+
+// Assume PCAP_ERRBUF_SIZE is defined in pcap.h
+// If not, you might need to define it manually or include another header.
+// For example: #define PCAP_ERRBUF_SIZE 256
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int error_code_to_test = -1; // Example: A common error code, or one you get from a pcap function
+
+    // --- Task 2.3: Check API call status ---
+    // For demonstration, let's simulate an error that might occur during pcap initialization.
+    // A common error is when no network devices are found.
+    // We'll try to find devices and use the error code from that operation.
+    char *dev = pcap_lookupdev(errbuf);
+    if (dev == NULL) {
+        fprintf(stderr, "Error finding network device: %s\n", errbuf);
+        // We need an actual error code to pass to pcap_strerror.
+        // If pcap_lookupdev fails, errbuf contains the error string,
+        // but we need an integer error code.
+        // For systems that set errno, we can try to use it.
+        // However, pcap_strerror's primary purpose is to translate libpcap's
+        // internal error numbers or system error numbers.
+        // Let's assume for this example that we have a known error number
+        // or can derive one. A generic error like EPERM (Permission denied)
+        // might be used if we can't get a specific libpcap error number.
+
+        // For demonstration, let's test with a known system error code.
+        // EACCES (Permission denied) is a good candidate if we're simulating
+        // a scenario where permissions are an issue for pcap.
+        // Or, we can deliberately set an invalid error number to see how
+        // pcap_strerror handles it.
+        error_code_to_test = EACCES; // Example: Permission denied
+        // Or for an unknown error case:
+        // error_code_to_test = 999;
+    } else {
+        // If device lookup was successful, we don't have a direct error number
+        // to pass to pcap_strerror from this particular call.
+        // Let's try to use a common system error code for demonstration.
+        error_code_to_test = ENOENT; // Example: No such file or directory
+    }
+
+    // --- Task 2.6: Add specific printf before calling pcap_strerror ---
+    printf("before pcap_strerror\n");
+    fflush(stdout); // Task 2.4: Flush stdout
+
+    char *error_message = pcap_strerror(error_code_to_test);
+
+    // --- Task 2.3 & 2.5: Check call status and output messages ---
+    if (error_message == NULL) {
+        fprintf(stderr, "Unexpected: pcap_strerror returned NULL.\n"); // Task 2.3: Different printf
+        fflush(stderr); // Task 2.4: Flush stderr
+        printf("Calling pcap_strerror fail\n"); // Task 2.5: Fail message
+        fflush(stdout); // Task 2.4: Flush stdout
+        return 123; // Task 2.3: Return specific error code
+    }
+
+    // The code provided for pcap_strerror itself handles cases where the
+    // error number is unknown and returns a specific string.
+    // We can infer success if it returns a non-NULL pointer.
+    // The function doesn't return an explicit status code like "success/fail"
+    // in its return type, but rather a string.
+    // So, we consider it successful if it returns a valid string pointer.
+
+    printf("pcap_strerror returned: %s\n", error_message); // Task 2.3: Different printf
+    fflush(stdout); // Task 2.4: Flush stdout
+
+    // We can check if the returned message indicates an unknown error
+    // to infer a "fail" scenario in terms of finding a meaningful error description.
+    if (strncmp(error_message, "Unknown error: ", 14) == 0) {
+        printf("Calling pcap_strerror fail\n"); // Task 2.5: Fail message for unknown error
+        fflush(stdout); // Task 2.4: Flush stdout
+        return 123; // Task 2.3: Return specific error code
+    } else {
+        printf("Calling pcap_strerror success\n"); // Task 2.5: Success message
+        fflush(stdout); // Task 2.4: Flush stdout
+    }
+
+
+    // Task 2.7: File read operation example (not strictly required by pcap_strerror itself, but for the overall code context)
+    // Since pcap_strerror doesn't involve file reads, we'll add a placeholder.
+    // We'll assume a hypothetical scenario where we might have read from a pcap file.
+    // For this example, we won't actually create/read a file, but demonstrate the naming convention.
+    FILE *dummy_file = NULL; // Placeholder for a file pointer
+
+    // If there were a file read operation, it would look like this:
+    // dummy_file = fopen("example.pcap", "rb");
+    // if (dummy_file == NULL) {
+    //     fprintf(stderr, "Failed to open example.pcap: %s\n", strerror(errno));
+    //     fflush(stderr);
+    //     printf("File operation failed.\n");
+    //     fflush(stdout);
+    //     return 123;
+    // }
+    // fclose(dummy_file); // Close the file if opened
+
+
+    return 0; // Success
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Assume PCAP_ERRBUF_SIZE is defined in pcap.h
+// If not, you might need to define it manually or include another header.
+// For example: #define PCAP_ERRBUF_SIZE 256
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int error_code_to_test = -1; // Example: A common error code, or one you get from a pcap function
+
+    // --- Task2.3: Check API call status ---
+    // For demonstration, let's simulate an error that might occur during pcap initialization.
+    // A common error is when no network devices are found.
+    // We'll try to find devices and use the error code from that operation.
+    char *dev = pcap_lookupdev(errbuf);
+    if (dev == NULL) {
+        fprintf(stderr, "Error finding network device: %s\n", errbuf);
+        // We need an actual error code to pass to pcap_strerror.
+        // If pcap_lookupdev fails, errbuf contains the error string,
+        // but we need an integer error code.
+        // For systems that set errno, we can try to use it.
+        // However, pcap_strerror's primary purpose is to translate libpcap's
+        // internal error numbers or system error numbers.
+        // Let's assume for this example that we have a known error number
+        // or can derive one. A generic error like EPERM (Permission denied)
+        // might be used if we can't get a specific libpcap error number.
+
+        // For demonstration, let's test with a known system error code.
+        // EACCES (Permission denied) is a good candidate if we're simulating
+        // a scenario where permissions are an issue for pcap.
+        // Or, we can deliberately set an invalid error number to see how
+        // pcap_strerror handles it.
+        error_code_to_test = EACCES; // Example: Permission denied
+        // Or for an unknown error case:
+        // error_code_to_test = 999;
+    } else {
+        // If device lookup was successful, we don't have a direct error number
+        // to pass to pcap_strerror from this particular call.
+        // Let's try to use a common system error code for demonstration.
+        error_code_to_test = ENOENT; // Example: No such file or directory
+    }
+
+    // --- Task2.6: Add specific printf before calling pcap_strerror ---
+    printf("before pcap_strerror\n");
+    fflush(stdout); // Task2.4: Flush stdout
+
+    char *error_message = pcap_strerror(error_code_to_test);
+
+    // --- Task2.3 & 2.5: Check call status and output messages ---
+    if (error_message == NULL) {
+        fprintf(stderr, "Unexpected: pcap_strerror returned NULL.\n"); // Task2.3: Different printf
+        fflush(stderr); // Task2.4: Flush stderr
+        printf("Calling pcap_strerror fail\n"); // Task2.5: Fail message
+        fflush(stdout); // Task2.4: Flush stdout
+        return 123; // Task2.3: Return specific error code
+    }
+
+    // The code provided for pcap_strerror itself handles cases where the
+    // error number is unknown and returns a specific string.
+    // We can infer success if it returns a non-NULL pointer.
+    // The function doesn't return an explicit status code like "success/fail"
+    // in its return type, but rather a string.
+    // So, we consider it successful if it returns a valid string pointer.
+
+    printf("pcap_strerror returned: %s\n", error_message); // Task2.3: Different printf
+    fflush(stdout); // Task2.4: Flush stdout
+
+    // We can check if the returned message indicates an unknown error
+    // to infer a "fail" scenario in terms of finding a meaningful error description.
+    if (strncmp(error_message, "Unknown error: ", 14) == 0) {
+        printf("Calling pcap_strerror fail\n"); // Task2.5: Fail message for unknown error
+        fflush(stdout); // Task2.4: Flush stdout
+        return 123; // Task2.3: Return specific error code
+    } else {
+        printf("Calling pcap_strerror success\n"); // Task2.5: Success message
+        fflush(stdout); // Task2.4: Flush stdout
+    }
+
+
+    // Task2.7: File read operation example (not strictly required by pcap_strerror itself, but for the overall code context)
+    // Since pcap_strerror doesn't involve file reads, we'll add a placeholder.
+    // We'll assume a hypothetical scenario where we might have read from a pcap file.
+    // For this example, we won't actually create/read a file, but demonstrate the naming convention.
+    FILE *dummy_file = NULL; // Placeholder for a file pointer
+
+    // If there were a file read operation, it would look like this:
+    // dummy_file = fopen("example.pcap", "rb");
+    // if (dummy_file == NULL) {
+    //     fprintf(stderr, "Failed to open example.pcap: %s\n", strerror(errno));
+    //     fflush(stderr);
+    //     printf("File operation failed.\n");
+    //     fflush(stdout);
+    //     return 123;
+    // }
+    // fclose(dummy_file); // Close the file if opened
+
+
+    return 0; // Success
+}
+
+
+ Run result: 
+False
+
+I0425 19:56:21.563446 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564079 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564111 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564114 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564116 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564119 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564121 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564123 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564125 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564128 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564130 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564132 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564134 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564136 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564140 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564142 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564144 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564146 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564150 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564152 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564154 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564156 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564158 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564160 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564162 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564164 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564166 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564168 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564170 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564171 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564173 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564175 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564177 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564179 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564181 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564183 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564186 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564191 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564193 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564194 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564196 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564198 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564201 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564202 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564204 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564206 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564208 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564210 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564212 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564214 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564216 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564217 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564219 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564221 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564223 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564225 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564227 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564232 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564234 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564236 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564239 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564240 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564242 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564245 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564247 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564248 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564250 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564252 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564254 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564256 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564258 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564260 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564263 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564265 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564267 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564270 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564272 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564274 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564276 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564278 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564280 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564282 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564283 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564285 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564287 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564289 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564291 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564293 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564294 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564296 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564298 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564300 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564302 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564304 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564306 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564308 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564310 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564312 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564314 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564315 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564317 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564319 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564321 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564323 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564325 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564327 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564329 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564330 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564332 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564334 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564336 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564360 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564362 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564364 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564366 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564368 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564370 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564372 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564374 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564376 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564377 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564379 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564381 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564383 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564385 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564387 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564389 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564391 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564393 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564395 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564397 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564398 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564400 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564402 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564404 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564406 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564408 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564410 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564412 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564414 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564415 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564417 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564419 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564421 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564432 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564434 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564436 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564438 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564440 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564442 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564444 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564446 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564447 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564449 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564451 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564453 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564455 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564457 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564459 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564460 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:56:21.564462 18063926 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+pcap_strerror.c: In function 'main':
+pcap_strerror.c:20:5: warning: 'pcap_lookupdev' is deprecated: use 'pcap_findalldevs' and use the first device [-Wdeprecated-declarations]
+   20 |     char *dev = pcap_lookupdev(errbuf);
+      |     ^~~~
+In file included from /usr/include/pcap.h:43,
+                 from pcap_strerror.c:5:
+/usr/include/pcap/pcap.h:394:18: note: declared here
+  394 | PCAP_API char   *pcap_lookupdev(char *)
+      |                  ^~~~~~~~~~~~~~
+pcap_strerror.c:38:30: error: 'EACCES' undeclared (first use in this function)
+   38 |         error_code_to_test = EACCES; // Example: Permission denied
+      |                              ^~~~~~
+pcap_strerror.c:38:30: note: each undeclared identifier is reported only once for each function it appears in
+pcap_strerror.c:45:30: error: 'ENOENT' undeclared (first use in this function)
+   45 |         error_code_to_test = ENOENT; // Example: No such file or directory
+      |                              ^~~~~~
+pcap_strerror.c:52:27: warning: initialization discards 'const' qualifier from pointer target type [-Wdiscarded-qualifiers]
+   52 |     char *error_message = pcap_strerror(error_code_to_test);
+      |                           ^~~~~~~~~~~~~
+
+compile
+Break cant parse code. token_right: 30311. Token_one: 2283
+Answer: 

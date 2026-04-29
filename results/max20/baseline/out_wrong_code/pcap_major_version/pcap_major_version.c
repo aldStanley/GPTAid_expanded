@@ -1,0 +1,146 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+int main() {
+    pcap_t *handle = NULL;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int major_version;
+    pcap_if_t *alldevs = NULL;
+    pcap_if_t *d = NULL;
+    char *dev_str = NULL;
+
+    // Task 1 Analysis:
+    // The function `pcap_major_version` checks `!p->activated`. If the handle `p` is not activated,
+    // it returns `PCAP_ERROR_NOT_ACTIVATED`. If it is activated, it returns `p->version_major`.
+    //
+    // The invocation specification is:
+    // 1. A valid `pcap_t *` handle must be provided.
+    // 2. For `pcap_major_version` to return a meaningful version number (>= 0), the `pcap_t *` handle
+    //    must have been successfully activated using `pcap_activate()`.
+    // 3. If the handle is not activated, `pcap_major_version` is expected to return `PCAP_ERROR_NOT_ACTIVATED` (which is a negative value).
+
+    // The previous run result indicated an error: "Error: pcap_major_version returned a version number (0) without activation, which is incorrect behavior."
+    // This suggests that even though `pcap_activate` was not called, `pcap_major_version` returned 0 instead of `PCAP_ERROR_NOT_ACTIVATED`.
+    // This might happen if the `pcap_t` structure's `activated` field is not properly set or if `version_major` defaults to 0.
+    // The core requirement is to test both the "not activated" state (expecting `PCAP_ERROR_NOT_ACTIVATED`) and the "activated" state (expecting a version number).
+
+    // We need a handle that can be activated. `pcap_open_live` is the best candidate.
+
+    // Try to find an available network interface.
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        fprintf(stderr, "Error finding devices: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+
+    // Iterate through the devices to find one that's suitable (usually has a name).
+    d = alldevs;
+    while (d != NULL) {
+        if (d->name) {
+            dev_str = d->name;
+            break;
+        }
+        d = d->next;
+    }
+
+    if (dev_str) {
+        printf("Attempting to open interface: %s\n", dev_str);
+        fflush(stdout);
+        handle = pcap_open_live(dev_str, 65536, 1, 1000, errbuf);
+        if (handle == NULL) {
+            fprintf(stderr, "Failed to open device %s: %s\n", dev_str, errbuf);
+            fflush(stdout);
+            pcap_freealldevs(alldevs);
+            return 123;
+        }
+        printf("Successfully opened device %s.\n", dev_str);
+        fflush(stdout);
+    } else {
+        fprintf(stderr, "No suitable network interface found to open.\n");
+        fflush(stdout);
+        pcap_freealldevs(alldevs);
+        return 123;
+    }
+    pcap_freealldevs(alldevs); // Free device list now that we have a handle.
+
+    // --- Test Case 1: Calling pcap_major_version on a non-activated handle ---
+    // This is to demonstrate that it should return PCAP_ERROR_NOT_ACTIVATED.
+    printf("Attempting to call pcap_major_version on a non-activated handle...\n");
+    fflush(stdout);
+    printf("before pcap_major_version\n");
+    fflush(stdout);
+
+    major_version = pcap_major_version(handle);
+
+    if (major_version == PCAP_ERROR_NOT_ACTIVATED) {
+        printf("Calling pcap_major_version fail (expected for non-activated handle)\n");
+        fflush(stdout);
+        printf("Correctly returned PCAP_ERROR_NOT_ACTIVATED as expected.\n");
+        fflush(stdout);
+    } else if (major_version < 0) {
+        // Handle other potential negative errors from pcap_major_version
+        printf("Calling pcap_major_version fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Unexpected negative return value from pcap_major_version on non-activated handle: %d\n", major_version);
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    } else {
+        // This is the scenario from the run result: returned a non-negative version (0)
+        // when it should have returned PCAP_ERROR_NOT_ACTIVATED or an error.
+        printf("Calling pcap_major_version fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error: pcap_major_version returned a version number (%d) without activation, which is incorrect behavior.\n", major_version);
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    }
+
+    // --- Test Case 2: Calling pcap_major_version on an activated handle ---
+    printf("\nAttempting to activate the pcap handle...\n");
+    fflush(stdout);
+
+    if (pcap_activate(handle) != 0) {
+        fprintf(stderr, "Failed to activate pcap handle: %s\n", pcap_geterr(handle));
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    }
+    printf("Pcap handle activated successfully.\n");
+    fflush(stdout);
+
+    printf("Attempting to call pcap_major_version on an activated handle...\n");
+    fflush(stdout);
+    printf("before pcap_major_version\n");
+    fflush(stdout);
+
+    major_version = pcap_major_version(handle);
+
+    if (major_version >= 0) { // A valid major version is non-negative.
+        printf("Calling pcap_major_version success\n");
+        fflush(stdout);
+        printf("Libpcap major version is: %d\n", major_version);
+        fflush(stdout);
+    } else {
+        // This block indicates an error during the call on an activated handle.
+        printf("Calling pcap_major_version fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error from pcap_major_version after activation: %d. Expected a non-negative version number.\n", major_version);
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    }
+
+    // Clean up
+    pcap_close(handle);
+    printf("Pcap handle closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+

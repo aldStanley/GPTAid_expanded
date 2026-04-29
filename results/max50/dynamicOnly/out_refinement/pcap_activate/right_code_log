@@ -1,0 +1,909 @@
+Question: 
+Given the following function `pcap_activate` in library `libpcap`, Complete the following tasks.
+```
+int pcap_activate(pcap_t *p){
+	int status;
+
+	/*
+	 * Catch attempts to re-activate an already-activated
+	 * pcap_t; this should, for example, catch code that
+	 * calls pcap_open_live() followed by pcap_activate(),
+	 * as some code that showed up in a Stack Exchange
+	 * question did.
+	 */
+	if (pcap_check_activated(p))
+		return (PCAP_ERROR_ACTIVATED);
+	status = p->activate_op(p);
+	if (status >= 0) {
+		/*
+		 * If somebody requested non-blocking mode before
+		 * calling pcap_activate(), turn it on now.
+		 */
+		if (p->opt.nonblock) {
+			status = p->setnonblock_op(p, 1);
+			if (status < 0) {
+				/*
+				 * Failed.  Undo everything done by
+				 * the activate operation.
+				 */
+				p->cleanup_op(p);
+				initialize_ops(p);
+				return (status);
+			}
+		}
+		p->activated = 1;
+	} else {
+		if (p->errbuf[0] == '\0') {
+			/*
+			 * No error message supplied by the activate routine;
+			 * for the benefit of programs that don't specially
+			 * handle errors other than PCAP_ERROR, return the
+			 * error message corresponding to the status.
+			 */
+			snprintf(p->errbuf, PCAP_ERRBUF_SIZE, "%s",
+			    pcap_statustostr(status));
+		}
+
+		/*
+		 * Undo any operation pointer setting, etc. done by
+		 * the activate operation.
+		 */
+		initialize_ops(p);
+	}
+	return (status);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_activate success" after calling `pcap_activate` successfully; Output: "Calling pcap_activate fail" after the call to `pcap_activate` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_activate\n")
+    ```
+    before calling `pcap_activate`. Make sure that there are no other function calls between this output and the calling to `pcap_activate`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+## Task 1: Invocation Specification for `pcap_activate`
+
+Based on the provided `pcap_activate` function code, the caller needs to follow these invocation specifications:
+
+1.  **`pcap_t *p` must be a valid and properly initialized `pcap_t` structure:**
+    *   The function receives a pointer `p` to a `pcap_t` structure.
+    *   This structure is expected to have its `activate_op`, `setnonblock_op`, and `cleanup_op` function pointers initialized (likely by a preceding `pcap_open_live` or similar function).
+    *   The `errbuf` member should be accessible for error messages.
+    *   The `opt.nonblock` flag needs to be set according to the desired non-blocking behavior before calling `pcap_activate`.
+
+2.  **`pcap_activate` should not be called on an already activated `pcap_t`:**
+    *   The first check in the function is `if (pcap_check_activated(p))`.
+    *   If `pcap_check_activated(p)` returns true, `pcap_activate` immediately returns `PCAP_ERROR_ACTIVATED`. This indicates that the `pcap_t` has already gone through its activation process. This prevents redundant activation and potential issues arising from it.
+
+3.  **Error handling is crucial:**
+    *   The return value of `pcap_activate` indicates success or failure.
+        *   A non-negative value generally signifies success.
+        *   A negative value signifies an error.
+    *   If `pcap_activate` fails, the `p->errbuf` may contain a descriptive error message. If it's empty, the function attempts to populate it using `pcap_statustostr`.
+    *   If `p->setnonblock_op` fails after a successful `activate_op`, `pcap_activate` will call `p->cleanup_op(p)` to undo the activation.
+
+4.  **`pcap_open_live` (or equivalent) should precede `pcap_activate`:**
+    *   The comment explicitly mentions catching code that calls `pcap_open_live()` followed by `pcap_activate()`. This strongly suggests that `pcap_open_live` (or a similar function that initializes the `pcap_t` structure and its operation pointers) is the expected precursor to `pcap_activate`. `pcap_activate` is the step that finalizes the setup initiated by `pcap_open_live`.
+
+## Task 2: Complete Code Example in Linux
+
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h> // For strerror
+
+// Define a custom error code for failures in this example
+#define MY_CUSTOM_ERROR_CODE 123
+
+int main() {
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int status;
+
+    // --- Step 1: Initialize a pcap_t structure ---
+    // For demonstration, we'll try to open a device.
+    // In a real-world scenario, you might have a more complex setup.
+    // Let's assume we want to capture from the first available interface.
+    // If no interface is available, pcap_open_live will fail gracefully.
+
+    // Set non-blocking mode preference before activation
+    // This will be checked by pcap_activate if the operation is successful
+    struct pcap_open_options open_opts;
+    memset(&open_opts, 0, sizeof(open_opts));
+    open_opts.immediate_mode = 0; // Not relevant for activation check
+    open_opts.nonblock = 1;       // Request non-blocking mode
+
+    handle = pcap_open_live(NULL,       // Device name (NULL tries to find one)
+                            65536,      // Max packet size
+                            0,          // Promiscuous mode (0 = off)
+                            1000,       // Read timeout (ms) - not directly used by activate_op for non-blocking
+                            errbuf);    // Error buffer
+
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to open pcap device: %s\n", errbuf);
+        fflush(stdout); // Flush stdout even on stderr output
+        return MY_CUSTOM_ERROR_CODE;
+    }
+
+    // Apply the desired non-blocking option to the handle BEFORE activation
+    // Note: pcap_open_live might have already tried to set non-blocking if it supports it.
+    // pcap_activate will re-apply it if p->opt.nonblock is set.
+    handle->opt.nonblock = 1; // Explicitly set it here
+
+    // --- Step 2: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout); // Ensure "before pcap_activate" is printed immediately
+
+    status = pcap_activate(handle);
+
+    // --- Step 3: Check the status of pcap_activate ---
+    if (status < 0) {
+        // pcap_activate failed
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout); // Flush stdout
+
+        // The error message might be in handle->errbuf if it was set by pcap_activate,
+        // or pcap_statustostr will provide a generic message if handle->errbuf is empty.
+        if (handle->errbuf[0] != '\0') {
+            fprintf(stderr, "pcap_activate failed with error: %s\n", handle->errbuf);
+        } else {
+            fprintf(stderr, "pcap_activate failed with status code %d: %s\n", status, pcap_statustostr(status));
+        }
+        fflush(stdout); // Flush stdout
+        pcap_close(handle); // Clean up the handle
+        return MY_CUSTOM_ERROR_CODE;
+    } else {
+        // pcap_activate succeeded
+        printf("Calling pcap_activate success\n");
+        fflush(stdout); // Flush stdout
+
+        // If activate_op returns >= 0, and non-blocking was requested,
+        // pcap_activate calls setnonblock_op. We can check if non-blocking is active.
+        // The `p->setnonblock_op` would have been called by `pcap_activate`.
+        // To verify non-blocking mode, you'd typically use `pcap_getnonblock`.
+        int nonblock_status = pcap_getnonblock(handle, errbuf);
+        if (nonblock_status == -1) {
+            fprintf(stderr, "Error checking non-blocking status: %s\n", errbuf);
+            fflush(stdout); // Flush stdout
+            pcap_close(handle);
+            return MY_CUSTOM_ERROR_CODE;
+        } else if (nonblock_status == 1) {
+            printf("Device is in non-blocking mode.\n");
+            fflush(stdout);
+        } else {
+            printf("Device is NOT in non-blocking mode.\n");
+            fflush(stdout);
+        }
+
+        // You can now proceed with capturing packets using this handle,
+        // for example, using pcap_loop or pcap_next_ex.
+        // For this example, we will just close the handle.
+        printf("pcap_activate completed successfully.\n");
+        fflush(stdout);
+    }
+
+    // --- Step 4: Clean up ---
+    pcap_close(handle);
+    printf("pcap handle closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Define a custom error code for failures in this example
+#define MY_CUSTOM_ERROR_CODE 123
+
+int main() {
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int status;
+
+    // --- Step 1: Initialize a pcap_t structure ---
+    // For demonstration, we'll try to open a device.
+    // In a real-world scenario, you might have a more complex setup.
+    // Let's assume we want to capture from the first available interface.
+    // If no interface is available, pcap_open_live will fail gracefully.
+
+    // Set non-blocking mode preference before activation
+    // This will be checked by pcap_activate if the operation is successful
+    struct pcap_open_options open_opts;
+    memset(&open_opts, 0, sizeof(open_opts));
+    open_opts.immediate_mode = 0; // Not relevant for activation check
+    open_opts.nonblock = 1;       // Request non-blocking mode
+
+    handle = pcap_open_live(NULL,       // Device name (NULL tries to find one)
+                            65536,      // Max packet size
+                            0,          // Promiscuous mode (0 = off)
+                            1000,       // Read timeout (ms) - not directly used by activate_op for non-blocking
+                            errbuf);    // Error buffer
+
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to open pcap device: %s\n", errbuf);
+        fflush(stdout); // Flush stdout even on stderr output
+        return MY_CUSTOM_ERROR_CODE;
+    }
+
+    // Apply the desired non-blocking option to the handle BEFORE activation
+    // Note: pcap_open_live might have already tried to set non-blocking if it supports it.
+    // pcap_activate will re-apply it if p->opt.nonblock is set.
+    handle->opt.nonblock = 1; // Explicitly set it here
+
+    // --- Step 2: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout); // Ensure "before pcap_activate" is printed immediately
+
+    status = pcap_activate(handle);
+
+    // --- Step 3: Check the status of pcap_activate ---
+    if (status < 0) {
+        // pcap_activate failed
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout); // Flush stdout
+
+        // The error message might be in handle->errbuf if it was set by pcap_activate,
+        // or pcap_statustostr will provide a generic message if handle->errbuf is empty.
+        if (handle->errbuf[0] != '\0') {
+            fprintf(stderr, "pcap_activate failed with error: %s\n", handle->errbuf);
+        } else {
+            fprintf(stderr, "pcap_activate failed with status code %d: %s\n", status, pcap_statustostr(status));
+        }
+        fflush(stdout); // Flush stdout
+        pcap_close(handle); // Clean up the handle
+        return MY_CUSTOM_ERROR_CODE;
+    } else {
+        // pcap_activate succeeded
+        printf("Calling pcap_activate success\n");
+        fflush(stdout); // Flush stdout
+
+        // If activate_op returns >= 0, and non-blocking was requested,
+        // pcap_activate calls setnonblock_op. We can check if non-blocking is active.
+        // The `p->setnonblock_op` would have been called by `pcap_activate`.
+        // To verify non-blocking mode, you'd typically use `pcap_getnonblock`.
+        int nonblock_status = pcap_getnonblock(handle, errbuf);
+        if (nonblock_status == -1) {
+            fprintf(stderr, "Error checking non-blocking status: %s\n", errbuf);
+            fflush(stdout); // Flush stdout
+            pcap_close(handle);
+            return MY_CUSTOM_ERROR_CODE;
+        } else if (nonblock_status == 1) {
+            printf("Device is in non-blocking mode.\n");
+            fflush(stdout);
+        } else {
+            printf("Device is NOT in non-blocking mode.\n");
+            fflush(stdout);
+        }
+
+        // You can now proceed with capturing packets using this handle,
+        // for example, using pcap_loop or pcap_next_ex.
+        // For this example, we will just close the handle.
+        printf("pcap_activate completed successfully.\n");
+        fflush(stdout);
+    }
+
+    // --- Step 4: Clean up ---
+    pcap_close(handle);
+    printf("pcap handle closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+False
+
+pcap_activate.c: In function 'main':
+pcap_activate.c:24:30: error: storage size of 'open_opts' isn't known
+   24 |     struct pcap_open_options open_opts;
+      |                              ^~~~~~~~~
+pcap_activate.c:44:11: error: invalid use of incomplete typedef 'pcap_t' {aka 'struct pcap'}
+   44 |     handle->opt.nonblock = 1; // Explicitly set it here
+      |           ^~
+pcap_activate.c:60:19: error: invalid use of incomplete typedef 'pcap_t' {aka 'struct pcap'}
+   60 |         if (handle->errbuf[0] != '\0') {
+      |                   ^~
+pcap_activate.c:61:76: error: invalid use of incomplete typedef 'pcap_t' {aka 'struct pcap'}
+   61 |             fprintf(stderr, "pcap_activate failed with error: %s\n", handle->errbuf);
+      |                                                                            ^~
+
+compile
+Question: 
+Run result of the code is: 
+
+pcap_activate.c: In function 'main':
+pcap_activate.c:24:30: error: storage size of 'open_opts' isn't known
+   24 |     struct pcap_open_options open_opts;
+      |                              ^~~~~~~~~
+pcap_activate.c:44:11: error: invalid use of incomplete typedef 'pcap_t' {aka 'struct pcap'}
+   44 |     handle->opt.nonblock = 1; // Explicitly set it here
+      |           ^~
+pcap_activate.c:60:19: error: invalid use of incomplete typedef 'pcap_t' {aka 'struct pcap'}
+   60 |         if (handle->errbuf[0] != '\0') {
+      |                   ^~
+pcap_activate.c:61:76: error: invalid use of incomplete typedef 'pcap_t' {aka 'struct pcap'}
+   61 |             fprintf(stderr, "pcap_activate failed with error: %s\n", handle->errbuf);
+      |                                                                            ^~
+Please fix this code based on the run result. Please Follow the instruction in the first session! 
+Note: I am using the program automation to run the code you gave, so please generate the code directly that will run correctly.
+Answer Format: ```code```
+Answer: 
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h> // For strerror
+
+// Define a custom error code for failures in this example
+#define MY_CUSTOM_ERROR_CODE 123
+
+int main() {
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int status;
+
+    // --- Step 1: Initialize a pcap_t structure ---
+    // For demonstration, we'll try to open a device.
+    // Let's assume we want to capture from the first available interface.
+    // If no interface is available, pcap_open_live will fail gracefully.
+
+    // pcap_open_live directly sets the options, no need for manual open_opts struct
+    handle = pcap_open_live(NULL,       // Device name (NULL tries to find one)
+                            65536,      // Max packet size
+                            0,          // Promiscuous mode (0 = off)
+                            1000,       // Read timeout (ms) - not directly used by activate_op for non-blocking
+                            errbuf);    // Error buffer
+
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to open pcap device: %s\n", errbuf);
+        fflush(stdout); // Flush stdout even on stderr output
+        return MY_CUSTOM_ERROR_CODE;
+    }
+
+    // pcap_activate checks and applies the non-blocking mode based on the flags
+    // set during pcap_open_live or if handle->opt.nonblock is set before activation.
+    // pcap_open_live usually handles setting this up internally if the option is passed.
+    // The issue was trying to directly access and set handle->opt.nonblock, which
+    // might be treated as an incomplete type or internal detail not meant for direct manipulation
+    // before activation completes its setup. The structure `pcap_t` itself is opaque from user-space.
+    // The intended way to set non-blocking mode is via the flag in pcap_open_live.
+    // Since we passed `NULL` for device, `pcap_open_live` might not have set `nonblock` based on flags.
+    // We can explicitly set it using `pcap_set_option` after opening but before activating,
+    // or rely on `pcap_activate` to set it if `handle->opt.nonblock` was correctly populated.
+    // The best approach is to ensure `pcap_open_live` is called with the desired options,
+    // or to use `pcap_set_option` if available and appropriate. However, the `pcap_activate`
+    // function's logic implies it reads from `p->opt.nonblock`.
+    // Let's assume for this context that `pcap_open_live` sets `handle->opt.nonblock` if `nonblock` was one of its options.
+    // The original code was trying to access `handle->opt.nonblock` which might be the cause of the incomplete type error.
+    // The fix is to rely on `pcap_open_live` to initialize `handle->opt.nonblock` or to use a public API to set it if needed.
+    // Since `pcap_open_live` does not directly expose a `nonblock` flag in its signature,
+    // we rely on `pcap_activate` to handle `p->opt.nonblock`. Let's assume `pcap_open_live` correctly initializes `p->opt.nonblock` based on system defaults or if it supports it implicitly.
+    // The error was likely due to trying to access `handle->opt.nonblock` which is an internal field.
+
+    // The fix for the "incomplete typedef" errors is to avoid direct member access on `pcap_t`.
+    // `pcap_t` is an opaque pointer, and its internal structure is not exposed for direct manipulation.
+    // `pcap_open_live` initializes the necessary fields, and `pcap_activate` uses the configured `activate_op` and other internal fields.
+    // The `opt.nonblock` is an internal field that `pcap_activate` reads.
+
+    // --- Step 2: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout); // Ensure "before pcap_activate" is printed immediately
+
+    status = pcap_activate(handle);
+
+    // --- Step 3: Check the status of pcap_activate ---
+    if (status < 0) {
+        // pcap_activate failed
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout); // Flush stdout
+
+        // The error message might be in handle->errbuf if it was set by pcap_activate.
+        // We can use pcap_geterr to get the error message associated with the handle.
+        fprintf(stderr, "pcap_activate failed with error: %s\n", pcap_geterr(handle));
+        fflush(stdout); // Flush stdout
+        pcap_close(handle); // Clean up the handle
+        return MY_CUSTOM_ERROR_CODE;
+    } else {
+        // pcap_activate succeeded
+        printf("Calling pcap_activate success\n");
+        fflush(stdout); // Flush stdout
+
+        // To check if non-blocking mode is active, use pcap_getnonblock.
+        // This function is designed to query the non-blocking status.
+        int nonblock_status = pcap_getnonblock(handle, errbuf);
+        if (nonblock_status == -1) {
+            fprintf(stderr, "Error checking non-blocking status: %s\n", errbuf);
+            fflush(stdout); // Flush stdout
+            pcap_close(handle);
+            return MY_CUSTOM_ERROR_CODE;
+        } else if (nonblock_status == 1) {
+            printf("Device is in non-blocking mode.\n");
+            fflush(stdout);
+        } else {
+            printf("Device is NOT in non-blocking mode.\n");
+            fflush(stdout);
+        }
+
+        // You can now proceed with capturing packets using this handle,
+        // for example, using pcap_loop or pcap_next_ex.
+        // For this example, we will just close the handle.
+        printf("pcap_activate completed successfully.\n");
+        fflush(stdout);
+    }
+
+    // --- Step 4: Clean up ---
+    pcap_close(handle);
+    printf("pcap handle closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Define a custom error code for failures in this example
+#define MY_CUSTOM_ERROR_CODE 123
+
+int main() {
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int status;
+
+    // --- Step 1: Initialize a pcap_t structure ---
+    // For demonstration, we'll try to open a device.
+    // Let's assume we want to capture from the first available interface.
+    // If no interface is available, pcap_open_live will fail gracefully.
+
+    // pcap_open_live directly sets the options, no need for manual open_opts struct
+    handle = pcap_open_live(NULL,       // Device name (NULL tries to find one)
+                            65536,      // Max packet size
+                            0,          // Promiscuous mode (0 = off)
+                            1000,       // Read timeout (ms) - not directly used by activate_op for non-blocking
+                            errbuf);    // Error buffer
+
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to open pcap device: %s\n", errbuf);
+        fflush(stdout); // Flush stdout even on stderr output
+        return MY_CUSTOM_ERROR_CODE;
+    }
+
+    // pcap_activate checks and applies the non-blocking mode based on the flags
+    // set during pcap_open_live or if handle->opt.nonblock is set before activation.
+    // pcap_open_live usually handles setting this up internally if the option is passed.
+    // The issue was trying to directly access and set handle->opt.nonblock, which
+    // might be treated as an incomplete type or internal detail not meant for direct manipulation
+    // before activation completes its setup. The structure `pcap_t` itself is opaque from user-space.
+    // The intended way to set non-blocking mode is via the flag in pcap_open_live.
+    // Since we passed `NULL` for device, `pcap_open_live` might not have set `nonblock` based on flags.
+    // We can explicitly set it using `pcap_set_option` after opening but before activating,
+    // or rely on `pcap_activate` to set it if `handle->opt.nonblock` was correctly populated.
+    // The best approach is to ensure `pcap_open_live` is called with the desired options,
+    // or to use `pcap_set_option` if available and appropriate. However, the `pcap_activate`
+    // function's logic implies it reads from `p->opt.nonblock`.
+    // Let's assume for this context that `pcap_open_live` sets `handle->opt.nonblock` if `nonblock` was one of its options.
+    // The original code was trying to access `handle->opt.nonblock` which might be the cause of the incomplete type error.
+    // The fix is to rely on `pcap_open_live` to initialize `handle->opt.nonblock` or to use a public API to set it if needed.
+    // Since `pcap_open_live` does not directly expose a `nonblock` flag in its signature,
+    // we rely on `pcap_activate` to handle `p->opt.nonblock`. Let's assume `pcap_open_live` correctly initializes `p->opt.nonblock` based on system defaults or if it supports it implicitly.
+    // The error was likely due to trying to access `handle->opt.nonblock` which is an internal field.
+
+    // The fix for the "incomplete typedef" errors is to avoid direct member access on `pcap_t`.
+    // `pcap_t` is an opaque pointer, and its internal structure is not exposed for direct manipulation.
+    // `pcap_open_live` initializes the necessary fields, and `pcap_activate` uses the configured `activate_op` and other internal fields.
+    // The `opt.nonblock` is an internal field that `pcap_activate` reads.
+
+    // --- Step 2: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout); // Ensure "before pcap_activate" is printed immediately
+
+    status = pcap_activate(handle);
+
+    // --- Step 3: Check the status of pcap_activate ---
+    if (status < 0) {
+        // pcap_activate failed
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout); // Flush stdout
+
+        // The error message might be in handle->errbuf if it was set by pcap_activate.
+        // We can use pcap_geterr to get the error message associated with the handle.
+        fprintf(stderr, "pcap_activate failed with error: %s\n", pcap_geterr(handle));
+        fflush(stdout); // Flush stdout
+        pcap_close(handle); // Clean up the handle
+        return MY_CUSTOM_ERROR_CODE;
+    } else {
+        // pcap_activate succeeded
+        printf("Calling pcap_activate success\n");
+        fflush(stdout); // Flush stdout
+
+        // To check if non-blocking mode is active, use pcap_getnonblock.
+        // This function is designed to query the non-blocking status.
+        int nonblock_status = pcap_getnonblock(handle, errbuf);
+        if (nonblock_status == -1) {
+            fprintf(stderr, "Error checking non-blocking status: %s\n", errbuf);
+            fflush(stdout); // Flush stdout
+            pcap_close(handle);
+            return MY_CUSTOM_ERROR_CODE;
+        } else if (nonblock_status == 1) {
+            printf("Device is in non-blocking mode.\n");
+            fflush(stdout);
+        } else {
+            printf("Device is NOT in non-blocking mode.\n");
+            fflush(stdout);
+        }
+
+        // You can now proceed with capturing packets using this handle,
+        // for example, using pcap_loop or pcap_next_ex.
+        // For this example, we will just close the handle.
+        printf("pcap_activate completed successfully.\n");
+        fflush(stdout);
+    }
+
+    // --- Step 4: Clean up ---
+    pcap_close(handle);
+    printf("pcap handle closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+False
+before pcap_activate
+Calling pcap_activate fail
+
+pcap_activate failed with error: can't perform  operation on activated capture
+
+error-handling
+token_right: 6913. Token_one: 2534
+Question: 
+Run result of the code is: 
+before pcap_activate
+Calling pcap_activate fail
+
+pcap_activate failed with error: can't perform  operation on activated capture
+Please fix this code based on the run result. Please Follow the instruction in the first session!
+Note: I am using the program automation to run the code you gave, so please generate the code directly that will run correctly
+Answer Format: ```code```
+Answer: 
+```code
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+// Define a custom error code for failures in this example
+#define MY_CUSTOM_ERROR_CODE 123
+
+int main() {
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int status;
+
+    // --- Step 1: Initialize a pcap_t structure ---
+    // For demonstration, we'll try to open a device.
+    // pcap_open_live tries to initialize the capture device.
+    // NULL device name means libpcap will try to find a default.
+    // If pcap_open_live fails, it returns NULL and sets errbuf.
+    handle = pcap_open_live(NULL,       // Device name (NULL tries to find one)
+                            65536,      // Max packet size
+                            0,          // Promiscuous mode (0 = off)
+                            1000,       // Read timeout (ms)
+                            errbuf);    // Error buffer
+
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to open pcap device: %s\n", errbuf);
+        fflush(stdout); // Flush stdout even on stderr output
+        return MY_CUSTOM_ERROR_CODE;
+    }
+
+    // --- Step 2: Call pcap_activate ---
+    // The error "can't perform operation on activated capture" suggests
+    // that the handle might have been implicitly activated by pcap_open_live
+    // or that some operation that implicitly activates it has already occurred.
+    // In some libpcap versions or scenarios, pcap_open_live might perform
+    // some activation steps that make a subsequent pcap_activate call redundant
+    // or erroneous if it's called again.
+    //
+    // The `pcap_check_activated(p)` function within `pcap_activate` is designed
+    // to prevent this. If `pcap_check_activated` returns true (meaning already activated),
+    // `pcap_activate` returns `PCAP_ERROR_ACTIVATED`.
+    //
+    // The traceback indicates `pcap_activate` itself returned a negative status.
+    // This means either `pcap_check_activated` returned true, or `p->activate_op(p)`
+    // returned a negative status.
+    //
+    // Given the error message "can't perform operation on activated capture",
+    // it's highly likely that `pcap_check_activated(p)` returned true.
+    //
+    // The problem might be in how the handle was initialized *before* calling `pcap_activate`.
+    // If `pcap_open_live` itself performs enough activation that `pcap_activate`
+    // sees it as already active, then calling `pcap_activate` is incorrect.
+    //
+    // According to libpcap documentation, `pcap_activate` is usually called
+    // *after* `pcap_open_live` if `pcap_open_live` did not fully activate the handle,
+    // or if specific options need to be applied that require explicit activation.
+    //
+    // The most common pattern is:
+    // handle = pcap_open_live(...)
+    // if (handle) {
+    //     status = pcap_activate(handle); // This is where the error happens.
+    // }
+    //
+    // The provided solution needs to address the situation where `pcap_open_live`
+    // might have already performed an activation that makes a subsequent `pcap_activate` call redundant.
+    // The function `pcap_activate` is called to *complete* the activation process.
+    // If `pcap_open_live` has already completed it, then calling `pcap_activate` again is the issue.
+    //
+    // Let's try to detect if activation has already happened.
+    // If `pcap_open_live` itself has already "activated" the handle, calling `pcap_activate`
+    // would indeed result in `PCAP_ERROR_ACTIVATED`.
+
+    // The prompt asks to *fix the code based on the run result*.
+    // The run result indicates `pcap_activate` failed because the capture was already activated.
+    // This means calling `pcap_activate` is the incorrect step in this context.
+    // `pcap_open_live` may have already completed the necessary activation.
+    //
+    // Therefore, if `pcap_open_live` succeeds, and `pcap_activate` fails with "already activated",
+    // it implies that the handle is ready for use without a subsequent `pcap_activate` call.
+    // We should check for `PCAP_ERROR_ACTIVATED` specifically, as this is the intended error
+    // for calling `pcap_activate` on an already activated handle.
+
+    printf("before pcap_activate\n");
+    fflush(stdout); // Ensure "before pcap_activate" is printed immediately
+
+    status = pcap_activate(handle);
+
+    // --- Step 3: Check the status of pcap_activate ---
+    if (status < 0) {
+        // Check if the error is specifically that it's already activated.
+        if (status == PCAP_ERROR_ACTIVATED) {
+            // This means pcap_open_live (or some prior operation) already activated the handle.
+            // The handle is likely ready for use.
+            printf("Calling pcap_activate failed, but handle is already activated.\n");
+            fflush(stdout); // Flush stdout
+            // We don't necessarily need to return an error code here if the handle is usable.
+            // For this specific problem, the requirement is to report success/failure of the *call* to pcap_activate.
+            // Since the call failed, we report failure of the call itself.
+            printf("Calling pcap_activate fail\n");
+            fflush(stdout);
+            // We still print the specific error message for debugging.
+            fprintf(stderr, "pcap_activate failed with error: %s\n", pcap_geterr(handle));
+            fflush(stdout); // Flush stdout
+            // In a real application, you might proceed to use `handle` here if the goal was just to get a usable handle.
+            // But for this example, we treat the *call to pcap_activate* as the operation we're testing.
+            pcap_close(handle);
+            return MY_CUSTOM_ERROR_CODE;
+        } else {
+            // Another error occurred during activation.
+            printf("Calling pcap_activate fail\n");
+            fflush(stdout); // Flush stdout
+            fprintf(stderr, "pcap_activate failed with unexpected error: %s\n", pcap_geterr(handle));
+            fflush(stdout); // Flush stdout
+            pcap_close(handle);
+            return MY_CUSTOM_ERROR_CODE;
+        }
+    } else {
+        // pcap_activate succeeded.
+        printf("Calling pcap_activate success\n");
+        fflush(stdout); // Flush stdout
+
+        // To check if non-blocking mode is active, use pcap_getnonblock.
+        int nonblock_status = pcap_getnonblock(handle, errbuf);
+        if (nonblock_status == -1) {
+            fprintf(stderr, "Error checking non-blocking status: %s\n", errbuf);
+            fflush(stdout); // Flush stdout
+            pcap_close(handle);
+            return MY_CUSTOM_ERROR_CODE;
+        } else if (nonblock_status == 1) {
+            printf("Device is in non-blocking mode after activation.\n");
+            fflush(stdout);
+        } else {
+            printf("Device is NOT in non-blocking mode after activation.\n");
+            fflush(stdout);
+        }
+
+        printf("pcap_activate completed successfully.\n");
+        fflush(stdout);
+    }
+
+    // --- Step 4: Clean up ---
+    // This part is reached if pcap_activate was successful.
+    pcap_close(handle);
+    printf("pcap handle closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+// Define a custom error code for failures in this example
+#define MY_CUSTOM_ERROR_CODE 123
+
+int main() {
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int status;
+
+    // --- Step 1: Initialize a pcap_t structure ---
+    // For demonstration, we'll try to open a device.
+    // pcap_open_live tries to initialize the capture device.
+    // NULL device name means libpcap will try to find a default.
+    // If pcap_open_live fails, it returns NULL and sets errbuf.
+    handle = pcap_open_live(NULL,       // Device name (NULL tries to find one)
+                            65536,      // Max packet size
+                            0,          // Promiscuous mode (0 = off)
+                            1000,       // Read timeout (ms)
+                            errbuf);    // Error buffer
+
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to open pcap device: %s\n", errbuf);
+        fflush(stdout); // Flush stdout even on stderr output
+        return MY_CUSTOM_ERROR_CODE;
+    }
+
+    // --- Step 2: Call pcap_activate ---
+    // The error "can't perform operation on activated capture" suggests
+    // that the handle might have been implicitly activated by pcap_open_live
+    // or that some operation that implicitly activates it has already occurred.
+    // In some libpcap versions or scenarios, pcap_open_live might perform
+    // some activation steps that make a subsequent pcap_activate call redundant
+    // or erroneous if it's called again.
+    //
+    // The `pcap_check_activated(p)` function within `pcap_activate` is designed
+    // to prevent this. If `pcap_check_activated` returns true (meaning already activated),
+    // `pcap_activate` returns `PCAP_ERROR_ACTIVATED`.
+    //
+    // The traceback indicates `pcap_activate` itself returned a negative status.
+    // This means either `pcap_check_activated` returned true, or `p->activate_op(p)`
+    // returned a negative status.
+    //
+    // Given the error message "can't perform operation on activated capture",
+    // it's highly likely that `pcap_check_activated(p)` returned true.
+    //
+    // The problem might be in how the handle was initialized *before* calling `pcap_activate`.
+    // If `pcap_open_live` itself performs enough activation that `pcap_activate`
+    // sees it as already active, then calling `pcap_activate` is incorrect.
+    //
+    // According to libpcap documentation, `pcap_activate` is usually called
+    // *after* `pcap_open_live` if `pcap_open_live` did not fully activate the handle,
+    // or if specific options need to be applied that require explicit activation.
+    //
+    // The most common pattern is:
+    // handle = pcap_open_live(...)
+    // if (handle) {
+    //     status = pcap_activate(handle); // This is where the error happens.
+    // }
+    //
+    // The provided solution needs to address the situation where `pcap_open_live`
+    // might have already performed an activation that makes a subsequent `pcap_activate` call redundant.
+    // The function `pcap_activate` is called to *complete* the activation process.
+    // If `pcap_open_live` has already completed it, then calling `pcap_activate` again is the issue.
+    //
+    // Let's try to detect if activation has already happened.
+    // If `pcap_open_live` itself has already "activated" the handle, calling `pcap_activate`
+    // would indeed result in `PCAP_ERROR_ACTIVATED`.
+
+    // The prompt asks to *fix the code based on the run result*.
+    // The run result indicates `pcap_activate` failed because the capture was already activated.
+    // This means calling `pcap_activate` is the incorrect step in this context.
+    // `pcap_open_live` may have already completed the necessary activation.
+    //
+    // Therefore, if `pcap_open_live` succeeds, and `pcap_activate` fails with "already activated",
+    // it implies that the handle is ready for use without a subsequent `pcap_activate` call.
+    // We should check for `PCAP_ERROR_ACTIVATED` specifically, as this is the intended error
+    // for calling `pcap_activate` on an already activated handle.
+
+    printf("before pcap_activate\n");
+    fflush(stdout); // Ensure "before pcap_activate" is printed immediately
+
+    status = pcap_activate(handle);
+
+    // --- Step 3: Check the status of pcap_activate ---
+    if (status < 0) {
+        // Check if the error is specifically that it's already activated.
+        if (status == PCAP_ERROR_ACTIVATED) {
+            // This means pcap_open_live (or some prior operation) already activated the handle.
+            // The handle is likely ready for use.
+            printf("Calling pcap_activate failed, but handle is already activated.\n");
+            fflush(stdout); // Flush stdout
+            // We don't necessarily need to return an error code here if the handle is usable.
+            // For this specific problem, the requirement is to report success/failure of the *call* to pcap_activate.
+            // Since the call failed, we report failure of the call itself.
+            printf("Calling pcap_activate fail\n");
+            fflush(stdout);
+            // We still print the specific error message for debugging.
+            fprintf(stderr, "pcap_activate failed with error: %s\n", pcap_geterr(handle));
+            fflush(stdout); // Flush stdout
+            // In a real application, you might proceed to use `handle` here if the goal was just to get a usable handle.
+            // But for this example, we treat the *call to pcap_activate* as the operation we're testing.
+            pcap_close(handle);
+            return MY_CUSTOM_ERROR_CODE;
+        } else {
+            // Another error occurred during activation.
+            printf("Calling pcap_activate fail\n");
+            fflush(stdout); // Flush stdout
+            fprintf(stderr, "pcap_activate failed with unexpected error: %s\n", pcap_geterr(handle));
+            fflush(stdout); // Flush stdout
+            pcap_close(handle);
+            return MY_CUSTOM_ERROR_CODE;
+        }
+    } else {
+        // pcap_activate succeeded.
+        printf("Calling pcap_activate success\n");
+        fflush(stdout); // Flush stdout
+
+        // To check if non-blocking mode is active, use pcap_getnonblock.
+        int nonblock_status = pcap_getnonblock(handle, errbuf);
+        if (nonblock_status == -1) {
+            fprintf(stderr, "Error checking non-blocking status: %s\n", errbuf);
+            fflush(stdout); // Flush stdout
+            pcap_close(handle);
+            return MY_CUSTOM_ERROR_CODE;
+        } else if (nonblock_status == 1) {
+            printf("Device is in non-blocking mode after activation.\n");
+            fflush(stdout);
+        } else {
+            printf("Device is NOT in non-blocking mode after activation.\n");
+            fflush(stdout);
+        }
+
+        printf("pcap_activate completed successfully.\n");
+        fflush(stdout);
+    }
+
+    // --- Step 4: Clean up ---
+    // This part is reached if pcap_activate was successful.
+    pcap_close(handle);
+    printf("pcap handle closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+False
+before pcap_activate
+Calling pcap_activate failed, but handle is already activated.
+Calling pcap_activate fail
+
+pcap_activate failed with error: can't perform  operation on activated capture
+
+error-handling
+token_right: 11185. Token_one: 2534
+Break cant parse code. token_right: 27428. Token_one: 6806
+Answer: 

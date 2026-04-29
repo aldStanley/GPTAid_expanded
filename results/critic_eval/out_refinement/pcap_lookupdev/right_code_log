@@ -1,0 +1,291 @@
+Question: 
+Given the following function `pcap_lookupdev` in library `libpcap`, Complete the following tasks.
+```
+char *
+pcap_lookupdev(char *errbuf){
+	pcap_if_t *alldevs;
+#ifdef _WIN32
+  /*
+   * Windows - use the same size as the old WinPcap 3.1 code.
+   * XXX - this is probably bigger than it needs to be.
+   */
+  #define IF_NAMESIZE 8192
+#else
+  /*
+   * UN*X - use the system's interface name size.
+   * XXX - that might not be large enough for capture devices
+   * that aren't regular network interfaces.
+   */
+#endif
+	static char device[IF_NAMESIZE + 1];
+	char *ret;
+
+	/*
+	 * We disable this in "new API" mode, because 1) in WinPcap/Npcap,
+	 * it may return UTF-16 strings, for backwards-compatibility
+	 * reasons, and we're also disabling the hack to make that work,
+	 * for not-going-past-the-end-of-a-string reasons, and 2) we
+	 * want its behavior to be consistent.
+	 *
+	 * In addition, it's not thread-safe, so we've marked it as
+	 * deprecated.
+	 */
+	if (pcap_new_api) {
+		snprintf(errbuf, PCAP_ERRBUF_SIZE,
+		    "pcap_lookupdev() is deprecated and is not supported in programs calling pcap_init()");
+		return (NULL);
+	}
+
+	if (pcap_findalldevs(&alldevs, errbuf) == -1)
+		return (NULL);
+
+	if (alldevs == NULL || (alldevs->flags & PCAP_IF_LOOPBACK)) {
+		/*
+		 * There are no devices on the list, or the first device
+		 * on the list is a loopback device, which means there
+		 * are no non-loopback devices on the list.  This means
+		 * we can't return any device.
+		 *
+		 * XXX - why not return a loopback device?  If we can't
+		 * capture on it, it won't be on the list, and if it's
+		 * on the list, there aren't any non-loopback devices,
+		 * so why not just supply it as the default device?
+		 */
+		(void)pcap_strlcpy(errbuf, "no suitable device found",
+		    PCAP_ERRBUF_SIZE);
+		ret = NULL;
+	} else {
+		/*
+		 * Return the name of the first device on the list.
+		 */
+		(void)pcap_strlcpy(device, alldevs->name, sizeof(device));
+		ret = device;
+	}
+
+	pcap_freealldevs(alldevs);
+	return (ret);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_lookupdev success" after calling `pcap_lookupdev` successfully; Output: "Calling pcap_lookupdev fail" after the call to `pcap_lookupdev` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_lookupdev\n")
+    ```
+    before calling `pcap_lookupdev`. Make sure that there are no other function calls between this output and the calling to `pcap_lookupdev`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Define PCAP_ERRBUF_SIZE if it's not defined in pcap.h
+#ifndef PCAP_ERRBUF_SIZE
+#define PCAP_ERRBUF_SIZE 256
+#endif
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    char *device = NULL;
+    pcap_if_t *alldevs = NULL; // Used in pcap_findalldevs for error checking, though pcap_lookupdev handles it internally.
+
+    // Task 1: Invocation Specification Analysis
+
+    // 1. `errbuf` must be a valid pointer to a character array of at least `PCAP_ERRBUF_SIZE`.
+    //    This buffer will be used to store error messages if the function fails.
+    // 2. The function returns a pointer to a statically allocated character array containing the
+    //    device name if successful, or NULL if it fails.
+    // 3. The function is NOT thread-safe and is deprecated if `pcap_init()` has been called.
+    //    The provided code snippet checks for `pcap_new_api` (which is likely a macro or
+    //    preprocessor definition indicating the new API is in use). If `pcap_new_api` is true,
+    //    it immediately returns NULL and sets an error message.
+    // 4. The function attempts to find all available network devices using `pcap_findalldevs`.
+    //    If `pcap_findalldevs` fails, `pcap_lookupdev` returns NULL.
+    // 5. If `pcap_findalldevs` succeeds, it checks the returned list of devices (`alldevs`).
+    //    - If `alldevs` is NULL or the first device is a loopback device (`PCAP_IF_LOOPBACK`),
+    //      it considers no suitable device found and returns NULL.
+    //    - Otherwise, it copies the name of the first non-loopback device found into its
+    //      internal static `device` buffer and returns a pointer to this buffer.
+    // 6. The internal `device` buffer has a fixed size (`IF_NAMESIZE + 1`). On Windows, this is 8192; on UN*X, it's system-dependent but might not be large enough for all capture devices.
+    // 7. The function calls `pcap_freealldevs(alldevs)` before returning, releasing the resources
+    //    allocated by `pcap_findalldevs`.
+
+    // Task 2: Complete Code for Linux
+
+    // Ensure errbuf is initialized
+    memset(errbuf, 0, sizeof(errbuf));
+
+    // Add line before calling pcap_lookupdev
+    printf("before pcap_lookupdev\n");
+    fflush(stdout);
+
+    // Call pcap_lookupdev
+    device = pcap_lookupdev(errbuf);
+
+    // Check the call status of pcap_lookupdev
+    if (device == NULL) {
+        // Calling pcap_lookupdev fail
+        printf("Calling pcap_lookupdev fail\n");
+        fflush(stdout);
+
+        // Output error message to infer the cause of the error
+        fprintf(stderr, "Error calling pcap_lookupdev: %s\n", errbuf);
+        fflush(stderr);
+
+        // Return 123 on failure
+        return 123;
+    } else {
+        // Calling pcap_lookupdev success
+        printf("Calling pcap_lookupdev success\n");
+        fflush(stdout);
+
+        // Output the found device name
+        printf("Found network device: %s\n", device);
+        fflush(stdout);
+    }
+
+    // No file read operations are inherently required by pcap_lookupdev itself,
+    // so the requirement for "example.xxx" is not directly applicable here.
+    // If one were to use the obtained device name for file operations (e.g.,
+    // saving captures to a file), then a filename like "capture.pcap" would be used.
+
+    return 0;
+}
+```
+
+```code
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Define PCAP_ERRBUF_SIZE if it's not defined in pcap.h
+#ifndef PCAP_ERRBUF_SIZE
+#define PCAP_ERRBUF_SIZE 256
+#endif
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    char *device = NULL;
+    pcap_if_t *alldevs = NULL; // Used in pcap_findalldevs for error checking, though pcap_lookupdev handles it internally.
+
+    // Ensure errbuf is initialized
+    memset(errbuf, 0, sizeof(errbuf));
+
+    // Add line before calling pcap_lookupdev
+    printf("before pcap_lookupdev\n");
+    fflush(stdout);
+
+    // Call pcap_lookupdev
+    // This function returns a pointer to a statically allocated buffer.
+    // It does not require any prior initialization beyond providing an error buffer.
+    device = pcap_lookupdev(errbuf);
+
+    // Check the call status of pcap_lookupdev
+    if (device == NULL) {
+        // Calling pcap_lookupdev fail
+        printf("Calling pcap_lookupdev fail\n");
+        fflush(stdout);
+
+        // Output error message to infer the cause of the error
+        fprintf(stderr, "Error calling pcap_lookupdev: %s\n", errbuf);
+        fflush(stderr);
+
+        // Return 123 on failure
+        return 123;
+    } else {
+        // Calling pcap_lookupdev success
+        printf("Calling pcap_lookupdev success\n");
+        fflush(stdout);
+
+        // Output the found device name
+        printf("Found network device: %s\n", device);
+        fflush(stdout);
+    }
+
+    // No file read operations are inherently required by pcap_lookupdev itself.
+    // If one were to use the obtained device name for file operations (e.g.,
+    // saving captures to a file), then a filename like "example.pcap" would be used.
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Define PCAP_ERRBUF_SIZE if it's not defined in pcap.h
+#ifndef PCAP_ERRBUF_SIZE
+#define PCAP_ERRBUF_SIZE 256
+#endif
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    char *device = NULL;
+    pcap_if_t *alldevs = NULL; // Used in pcap_findalldevs for error checking, though pcap_lookupdev handles it internally.
+
+    // Ensure errbuf is initialized
+    memset(errbuf, 0, sizeof(errbuf));
+
+    // Add line before calling pcap_lookupdev
+    printf("before pcap_lookupdev\n");
+    fflush(stdout);
+
+    // Call pcap_lookupdev
+    // This function returns a pointer to a statically allocated buffer.
+    // It does not require any prior initialization beyond providing an error buffer.
+    device = pcap_lookupdev(errbuf);
+
+    // Check the call status of pcap_lookupdev
+    if (device == NULL) {
+        // Calling pcap_lookupdev fail
+        printf("Calling pcap_lookupdev fail\n");
+        fflush(stdout);
+
+        // Output error message to infer the cause of the error
+        fprintf(stderr, "Error calling pcap_lookupdev: %s\n", errbuf);
+        fflush(stderr);
+
+        // Return 123 on failure
+        return 123;
+    } else {
+        // Calling pcap_lookupdev success
+        printf("Calling pcap_lookupdev success\n");
+        fflush(stdout);
+
+        // Output the found device name
+        printf("Found network device: %s\n", device);
+        fflush(stdout);
+    }
+
+    // No file read operations are inherently required by pcap_lookupdev itself.
+    // If one were to use the obtained device name for file operations (e.g.,
+    // saving captures to a file), then a filename like "example.pcap" would be used.
+
+    return 0;
+}
+
+
+ Run result: 
+True
+before pcap_lookupdev
+Calling pcap_lookupdev success
+Found network device: eth0
+
+
+run

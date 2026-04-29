@@ -1,0 +1,122 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+
+// Assume PCAP_ERRBUF_SIZE is defined in pcap.h, usually 256 or similar.
+// If not, you might need to define it:
+#ifndef PCAP_ERRBUF_SIZE
+#define PCAP_ERRBUF_SIZE 256
+#endif
+
+int main() {
+    // Task2.3: Check API call status.
+    // pcap_strerror returns a char* which is either a valid error string or a custom one.
+    // The "status" of pcap_strerror isn't a direct return code like success/failure.
+    // We'll simulate a "failure" by providing an errnum that might not have a standard string,
+    // and then check if the returned string indicates it's an "unknown error".
+    // For a "success" case, we'll use a known good error code.
+
+    // --- Simulate a successful call ---
+    // On Linux, error code 0 often means no error, but it's not a universal pcap error.
+    // Let's try to get an error string for a plausible scenario, like trying to open a non-existent device.
+    // For the purpose of demonstrating pcap_strerror, we can use a known system error code.
+    // A common system error code for "success" in strerror is 0.
+    // We need to make sure our errnum has a corresponding string in libpcap's lookup.
+    // If HAVE_STRERROR is defined and _WIN32 is not, it directly calls strerror(errnum).
+    // Let's use a known POSIX error code for demonstration. E.g., ENOENT (No such file or directory) is 2.
+    int valid_errnum = 2; // ENOENT
+    char *error_message_success = NULL;
+
+    printf("before pcap_strerror (valid_errnum)\n");
+    fflush(stdout);
+
+    error_message_success = pcap_strerror(valid_errnum);
+
+    if (error_message_success != NULL) {
+        printf("Calling pcap_strerror success for %d\n", valid_errnum);
+        fflush(stdout);
+        printf("Error message for %d: %s\n", valid_errnum, error_message_success);
+        fflush(stdout);
+    } else {
+        // pcap_strerror itself should not return NULL, it returns a string.
+        // This branch is unlikely to be hit based on the function's implementation.
+        fprintf(stderr, "Unexpected NULL return from pcap_strerror for %d.\n", valid_errnum);
+        fflush(stderr);
+        return 123; // Indicate failure
+    }
+
+    // --- Simulate a call that might "fail" (or return an unknown error) ---
+    // We'll use an errnum that is likely out of the range of sys_errlist or not handled.
+    int invalid_errnum = 9999;
+    char *error_message_fail = NULL;
+
+    printf("before pcap_strerror (invalid_errnum)\n");
+    fflush(stdout);
+
+    error_message_fail = pcap_strerror(invalid_errnum);
+
+    if (error_message_fail != NULL) {
+        // We need to infer failure. The function returns a string even for "unknown" errors.
+        // The "failure" here is conceptual: the error code didn't map to a known string.
+        // The function implementation handles this by returning "Unknown error: %d".
+        // So, we check if the returned string matches this pattern.
+        char expected_fail_msg[PCAP_ERRBUF_SIZE];
+        snprintf(expected_fail_msg, sizeof(expected_fail_msg), "Unknown error: %d", invalid_errnum);
+
+        if (strcmp(error_message_fail, expected_fail_msg) == 0) {
+            printf("Calling pcap_strerror fail for %d (as expected)\n", invalid_errnum);
+            fflush(stdout);
+            fprintf(stderr, "Error message for %d: %s (Indicates an unhandled error code)\n", invalid_errnum, error_message_fail);
+            fflush(stderr);
+            // We don't return 123 here to allow the next part of the demonstration.
+        } else {
+            // This case means the invalid_errnum actually mapped to a known string, which is unlikely but possible.
+            printf("Calling pcap_strerror success (unexpected for invalid_errnum %d)\n", invalid_errnum);
+            fflush(stdout);
+            printf("Error message for %d: %s\n", invalid_errnum, error_message_fail);
+            fflush(stdout);
+        }
+    } else {
+        // This branch is unlikely to be hit.
+        fprintf(stderr, "Unexpected NULL return from pcap_strerror for %d.\n", invalid_errnum);
+        fflush(stderr);
+        return 123; // Indicate failure
+    }
+
+    // Task2.7: No file read operations are needed for this specific task.
+    // If file operations were required, we would create and open "example.pcap" (or similar).
+
+    // --- VIOLATION: Passing an uninitialized integer as errnum ---
+    // This violates the rule: "errnum should be a valid error code returned by a preceding pcap operation or a known system error code."
+    // An uninitialized integer has an indeterminate value, which is not a valid error code.
+    int uninitialized_err;
+    // The value of uninitialized_err is not set before being passed to pcap_strerror.
+    // This is consistent with the violation example provided.
+
+    printf("\n--- Demonstrating Violation ---\n");
+    fflush(stdout);
+
+    printf("before pcap_strerror (uninitialized_err)\n");
+    fflush(stdout);
+
+    char *error_message_uninitialized = pcap_strerror(uninitialized_err);
+
+    printf("Calling pcap_strerror with uninitialized errnum\n");
+    fflush(stdout);
+    printf("Error message for uninitialized errnum: %s\n", error_message_uninitialized);
+    fflush(stdout);
+
+    // The behavior of pcap_strerror with an uninitialized value is undefined.
+    // It might result in a crash, or it might produce an "Unknown error: %d" message
+    // with a garbage number, or it might coincidentally map to a valid error code.
+    // The violation is in the act of passing an uninitialized value, not necessarily
+    // in the specific output it produces.
+
+    return 0; // Success
+}
+

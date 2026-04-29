@@ -1,0 +1,539 @@
+Question: 
+Given the following function `pcap_next_ex` in library `libpcap`, Complete the following tasks.
+```
+int pcap_next_ex(pcap_t *p, struct pcap_pkthdr **pkt_header,
+    const u_char **pkt_data){
+	struct oneshot_userdata s;
+
+	s.hdr = &p->pcap_header;
+	s.pkt = pkt_data;
+	s.pd = p;
+
+	/* Saves a pointer to the packet headers */
+	*pkt_header= &p->pcap_header;
+
+	if (p->rfile != NULL) {
+		int status;
+
+		/* We are on an offline capture */
+		status = pcap_offline_read(p, 1, p->oneshot_callback,
+		    (u_char *)&s);
+
+		/*
+		 * Return codes for pcap_offline_read() are:
+		 *   -  0: EOF
+		 *   - -1: error
+		 *   - >0: OK - result is number of packets read, so
+		 *         it will be 1 in this case, as we've passed
+		 *         a maximum packet count of 1
+		 * The first one ('0') conflicts with the return code of
+		 * 0 from pcap_read() meaning "no packets arrived before
+		 * the timeout expired", so we map it to -2 so you can
+		 * distinguish between an EOF from a savefile and a
+		 * "no packets arrived before the timeout expired, try
+		 * again" from a live capture.
+		 */
+		if (status == 0)
+			return (-2);
+		else
+			return (status);
+	}
+
+	/*
+	 * Return codes for pcap_read() are:
+	 *   -  0: timeout
+	 *   - -1: error
+	 *   - -2: loop was broken out of with pcap_breakloop()
+	 *   - >0: OK, result is number of packets captured, so
+	 *         it will be 1 in this case, as we've passed
+	 *         a maximum packet count of 1
+	 * The first one ('0') conflicts with the return code of 0 from
+	 * pcap_offline_read() meaning "end of file".
+	*/
+	return (p->read_op(p, 1, p->oneshot_callback, (u_char *)&s));
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_next_ex success" after calling `pcap_next_ex` successfully; Output: "Calling pcap_next_ex fail" after the call to `pcap_next_ex` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_next_ex\n")
+    ```
+    before calling `pcap_next_ex`. Make sure that there are no other function calls between this output and the calling to `pcap_next_ex`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+Here's the analysis and the complete code for calling `pcap_next_ex`:
+
+## Task 1: Invocation Specification of `pcap_next_ex`
+
+The caller needs to follow these specifications when calling `pcap_next_ex`:
+
+1.  **`pcap_t *p`**: A valid `pcap_t` handle must be provided. This handle is typically obtained from `pcap_open_live()` or `pcap_open_offline()`.
+2.  **`struct pcap_pkthdr **pkt_header`**: A pointer to a pointer to a `struct pcap_pkthdr` must be provided.
+    *   On successful return (indicating a packet was received), `*pkt_header` will be populated with a pointer to the packet's header information (containing timestamp, captured length, and original length).
+    *   The function internally sets `*pkt_header` to `&p->pcap_header`. This means the caller will receive a pointer to an internal buffer within the `pcap_t` structure. It's important to note that this buffer might be reused for subsequent packets.
+3.  **`const u_char **pkt_data`**: A pointer to a pointer to `const u_char` must be provided.
+    *   On successful return (indicating a packet was received), `*pkt_data` will be populated with a pointer to the actual packet data.
+    *   Similar to `pkt_header`, this pointer points to an internal buffer within the `pcap_t` structure that can be reused.
+
+**Return Value Interpretation:**
+
+*   **`> 0`**: Success. The value represents the number of packets read, which will be `1` in this case.
+*   **`0`**:
+    *   For live captures (`p->rfile == NULL`): A timeout occurred. No packets were received before the timeout expired. The caller should typically retry.
+    *   For offline captures (`p->rfile != NULL`): End of file (EOF) reached in the savefile.
+*   **`-1`**: An error occurred during the read operation. The specific error can be retrieved using `pcap_geterr(p)`.
+*   **`-2`**: End of file (EOF) reached in an offline capture. This return value is used to distinguish EOF in offline captures from the timeout case (0) in live captures.
+
+## Task 2: Complete Code Example
+
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Define a dummy callback function as it's required by pcap_next_ex internally
+// In this simplified example, we don't need to do anything with the packet here.
+void dummy_oneshot_callback(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes) {
+    // Do nothing, as pcap_next_ex handles the packet pointer assignments.
+}
+
+int main(int argc, char *argv[]) {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+    struct pcap_pkthdr *header;
+    const u_char *packet;
+    int packet_count = 0;
+    const char *interface = NULL; // For live capture
+    const char *filename = "example.pcap"; // For offline capture
+
+    // --- Example Usage for Live Capture ---
+    // Find a network interface. In a real application, you'd likely
+    // want to list available interfaces and let the user choose.
+    // For this non-interactive example, we'll try to open the first one.
+    interface = pcap_lookupdev(errbuf);
+    if (interface == NULL) {
+        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
+        printf("Exiting due to device lookup failure.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Found default device: %s\n", interface);
+    fflush(stdout);
+
+    handle = pcap_open_live(interface, BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Couldn't open device %s: %s\n", interface, errbuf);
+        printf("Exiting due to pcap_open_live failure.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened device for live capture.\n");
+    fflush(stdout);
+
+    // --- Call pcap_next_ex for live capture ---
+    printf("before pcap_next_ex\n");
+    fflush(stdout);
+
+    int result = pcap_next_ex(handle, &header, &packet);
+
+    if (result > 0) {
+        printf("Calling pcap_next_ex success\n");
+        fflush(stdout);
+        packet_count++;
+        printf("Packet %d captured: %u bytes\n", packet_count, header->caplen);
+        fflush(stdout);
+        // In a real scenario, you would process 'packet' here.
+        // For this example, we just acknowledge it.
+    } else if (result == 0) {
+        printf("Calling pcap_next_ex fail: Timeout occurred (no packets received).\n");
+        fflush(stdout);
+    } else { // result == -1 or -2
+        fprintf(stderr, "Error in pcap_next_ex: %s\n", pcap_geterr(handle));
+        printf("Calling pcap_next_ex fail\n");
+        fflush(stdout);
+    }
+
+    pcap_close(handle);
+    printf("Closed live capture handle.\n");
+    fflush(stdout);
+
+    // --- Example Usage for Offline Capture ---
+    // Create a dummy pcap file for demonstration.
+    // In a real scenario, you would have an existing file.
+    FILE *dummy_file = fopen(filename, "wb");
+    if (!dummy_file) {
+        perror("Failed to create dummy pcap file");
+        printf("Exiting due to dummy file creation failure.\n");
+        fflush(stdout);
+        return 123;
+    }
+    // Write a minimal valid pcap header to make it slightly more real.
+    // This is not a full pcap file generation, just enough for open_offline to not error.
+    pcap_dumper_t *dumper = pcap_dump_open(NULL, filename, errbuf); // Use NULL handle to create a new file
+    if (!dumper) {
+        fprintf(stderr, "Error opening dumper for %s: %s\n", filename, errbuf);
+        fclose(dummy_file); // Close the file handle
+        printf("Exiting due to pcap_dump_open failure.\n");
+        fflush(stdout);
+        return 123;
+    }
+    pcap_dump_close(dumper);
+    fclose(dummy_file); // Close the file handle
+
+    printf("Attempting to open offline file: %s\n", filename);
+    fflush(stdout);
+
+    handle = pcap_open_offline(filename, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Couldn't open file %s: %s\n", filename, errbuf);
+        printf("Exiting due to pcap_open_offline failure.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened file for offline capture.\n");
+    fflush(stdout);
+
+    // --- Call pcap_next_ex for offline capture ---
+    printf("before pcap_next_ex\n");
+    fflush(stdout);
+
+    result = pcap_next_ex(handle, &header, &packet);
+
+    if (result > 0) {
+        printf("Calling pcap_next_ex success\n");
+        fflush(stdout);
+        packet_count++;
+        printf("Packet %d read from file: %u bytes\n", packet_count, header->caplen);
+        fflush(stdout);
+    } else if (result == -2) { // EOF for offline capture
+        printf("Calling pcap_next_ex fail: End of file reached.\n");
+        fflush(stdout);
+    } else if (result == 0) {
+        // This case (0 for offline) implies an EOF without -2, which is unusual
+        // but we handle it defensively.
+        printf("Calling pcap_next_ex fail: Unexpected return 0 in offline capture.\n");
+        fflush(stdout);
+    } else { // result == -1
+        fprintf(stderr, "Error in pcap_next_ex: %s\n", pcap_geterr(handle));
+        printf("Calling pcap_next_ex fail\n");
+        fflush(stdout);
+    }
+
+    pcap_close(handle);
+    printf("Closed offline capture handle.\n");
+    fflush(stdout);
+
+    // Clean up the dummy file
+    if (remove(filename) != 0) {
+        perror("Error removing dummy pcap file");
+    } else {
+        printf("Removed dummy pcap file: %s\n", filename);
+        fflush(stdout);
+    }
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Define a dummy callback function as it's required by pcap_next_ex internally
+// In this simplified example, we don't need to do anything with the packet here.
+void dummy_oneshot_callback(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes) {
+    // Do nothing, as pcap_next_ex handles the packet pointer assignments.
+}
+
+int main(int argc, char *argv[]) {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+    struct pcap_pkthdr *header;
+    const u_char *packet;
+    int packet_count = 0;
+    const char *interface = NULL; // For live capture
+    const char *filename = "example.pcap"; // For offline capture
+
+    // --- Example Usage for Live Capture ---
+    // Find a network interface. In a real application, you'd likely
+    // want to list available interfaces and let the user choose.
+    // For this non-interactive example, we'll try to open the first one.
+    interface = pcap_lookupdev(errbuf);
+    if (interface == NULL) {
+        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
+        printf("Exiting due to device lookup failure.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Found default device: %s\n", interface);
+    fflush(stdout);
+
+    handle = pcap_open_live(interface, BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Couldn't open device %s: %s\n", interface, errbuf);
+        printf("Exiting due to pcap_open_live failure.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened device for live capture.\n");
+    fflush(stdout);
+
+    // --- Call pcap_next_ex for live capture ---
+    printf("before pcap_next_ex\n");
+    fflush(stdout);
+
+    int result = pcap_next_ex(handle, &header, &packet);
+
+    if (result > 0) {
+        printf("Calling pcap_next_ex success\n");
+        fflush(stdout);
+        packet_count++;
+        printf("Packet %d captured: %u bytes\n", packet_count, header->caplen);
+        fflush(stdout);
+        // In a real scenario, you would process 'packet' here.
+        // For this example, we just acknowledge it.
+    } else if (result == 0) {
+        printf("Calling pcap_next_ex fail: Timeout occurred (no packets received).\n");
+        fflush(stdout);
+    } else { // result == -1 or -2
+        fprintf(stderr, "Error in pcap_next_ex: %s\n", pcap_geterr(handle));
+        printf("Calling pcap_next_ex fail\n");
+        fflush(stdout);
+    }
+
+    pcap_close(handle);
+    printf("Closed live capture handle.\n");
+    fflush(stdout);
+
+    // --- Example Usage for Offline Capture ---
+    // Create a dummy pcap file for demonstration.
+    // In a real scenario, you would have an existing file.
+    FILE *dummy_file = fopen(filename, "wb");
+    if (!dummy_file) {
+        perror("Failed to create dummy pcap file");
+        printf("Exiting due to dummy file creation failure.\n");
+        fflush(stdout);
+        return 123;
+    }
+    // Write a minimal valid pcap header to make it slightly more real.
+    // This is not a full pcap file generation, just enough for open_offline to not error.
+    pcap_dumper_t *dumper = pcap_dump_open(NULL, filename, errbuf); // Use NULL handle to create a new file
+    if (!dumper) {
+        fprintf(stderr, "Error opening dumper for %s: %s\n", filename, errbuf);
+        fclose(dummy_file); // Close the file handle
+        printf("Exiting due to pcap_dump_open failure.\n");
+        fflush(stdout);
+        return 123;
+    }
+    pcap_dump_close(dumper);
+    fclose(dummy_file); // Close the file handle
+
+    printf("Attempting to open offline file: %s\n", filename);
+    fflush(stdout);
+
+    handle = pcap_open_offline(filename, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Couldn't open file %s: %s\n", filename, errbuf);
+        printf("Exiting due to pcap_open_offline failure.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened file for offline capture.\n");
+    fflush(stdout);
+
+    // --- Call pcap_next_ex for offline capture ---
+    printf("before pcap_next_ex\n");
+    fflush(stdout);
+
+    result = pcap_next_ex(handle, &header, &packet);
+
+    if (result > 0) {
+        printf("Calling pcap_next_ex success\n");
+        fflush(stdout);
+        packet_count++;
+        printf("Packet %d read from file: %u bytes\n", packet_count, header->caplen);
+        fflush(stdout);
+    } else if (result == -2) { // EOF for offline capture
+        printf("Calling pcap_next_ex fail: End of file reached.\n");
+        fflush(stdout);
+    } else if (result == 0) {
+        // This case (0 for offline) implies an EOF without -2, which is unusual
+        // but we handle it defensively.
+        printf("Calling pcap_next_ex fail: Unexpected return 0 in offline capture.\n");
+        fflush(stdout);
+    } else { // result == -1
+        fprintf(stderr, "Error in pcap_next_ex: %s\n", pcap_geterr(handle));
+        printf("Calling pcap_next_ex fail\n");
+        fflush(stdout);
+    }
+
+    pcap_close(handle);
+    printf("Closed offline capture handle.\n");
+    fflush(stdout);
+
+    // Clean up the dummy file
+    if (remove(filename) != 0) {
+        perror("Error removing dummy pcap file");
+    } else {
+        printf("Removed dummy pcap file: %s\n", filename);
+        fflush(stdout);
+    }
+
+    return 0;
+}
+
+
+ Run result: 
+False
+
+I0423 15:23:27.888581 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889313 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889321 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889324 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889326 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889330 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889332 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889334 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889337 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889340 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889342 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889344 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889345 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889347 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889349 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889351 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889353 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889355 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889358 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889360 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889362 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889364 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889366 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889368 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889370 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889372 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889374 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889376 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889378 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889380 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889382 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889384 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889386 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889388 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889390 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889391 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889394 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889396 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889398 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889400 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889402 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889404 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889406 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889408 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889409 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889411 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889413 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889416 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889418 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889420 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889422 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889423 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889426 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889428 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889430 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889432 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889434 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889435 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889437 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889440 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889442 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889444 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889445 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889447 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889449 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889451 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889453 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889455 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889457 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889459 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889461 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889462 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889466 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889468 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889470 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889472 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889474 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889475 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889477 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889479 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889481 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889483 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889485 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889487 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889489 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889491 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889493 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889495 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889497 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889499 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889501 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889504 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889506 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889508 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889510 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889512 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889514 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889516 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889518 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889520 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889522 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889524 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889526 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889528 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889530 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889532 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889534 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889536 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889538 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889540 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889542 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889544 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889546 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889548 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889550 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:23:27.889552 15471012 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+pcap_next_ex.c: In function 'main':
+pcap_next_ex.c:27:5: warning: 'pcap_lookupdev' is deprecated: use 'pcap_findalldevs' and use the first device [-Wdeprecated-declarations]
+   27 |     interface = pcap_lookupdev(errbuf);
+      |     ^~~~~~~~~
+In file included from /usr/include/pcap.h:43,
+                 from pcap_next_ex.c:5:
+/usr/include/pcap/pcap.h:394:18: note: declared here
+  394 | PCAP_API char   *pcap_lookupdev(char *)
+      |                  ^~~~~~~~~~~~~~
+pcap_next_ex.c:86:29: error: too many arguments to function 'pcap_dump_open'
+   86 |     pcap_dumper_t *dumper = pcap_dump_open(NULL, filename, errbuf); // Use NULL handle to create a new file
+      |                             ^~~~~~~~~~~~~~
+In file included from /usr/include/pcap.h:43,
+                 from pcap_next_ex.c:5:
+/usr/include/pcap/pcap.h:695:25: note: declared here
+  695 | PCAP_API pcap_dumper_t *pcap_dump_open(pcap_t *, const char *);
+      |                         ^~~~~~~~~~~~~~
+
+compile
+Break cant parse code. token_right: 27789. Token_one: 3055
+Answer: 

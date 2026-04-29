@@ -1,0 +1,77 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+
+// Global variable to track if pcap_close was called successfully
+// This is a workaround to simulate success/failure for a void function
+// and adhere to the output requirements.
+int pcap_close_successful = 0;
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    const char *device = "eth0"; // Common default device name, might need to be changed.
+
+    // Open the live capture device
+    handle = pcap_open_live(device, BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening adapter: %s\n", errbuf);
+        fflush(stdout); // Ensure any preceding prints are flushed
+        return 123; // Indicate failure as per requirements
+    }
+    printf("Successfully opened device %s.\n", device);
+    fflush(stdout);
+
+    // --- Call pcap_close ---
+    printf("before pcap_close\n");
+    fflush(stdout);
+
+    // The pcap_close function is void and doesn't return a status.
+    // We will consider 'success' if we reach this point with a valid 'handle'
+    // and 'fail' if pcap_open_live failed or if we were to call pcap_close
+    // with a NULL or invalid handle (which we are not doing here for a valid call).
+    // The provided pcap_close code itself might fail if p->cleanup_op is bad
+    // or if free fails, but these are hard to predict and test in a simple example.
+    // We'll assume successful execution of pcap_close if it doesn't crash.
+
+    // --- VIOLATION: Calling pcap_close with a NULL handle ---
+    // To violate the rule "Ensure `p` is not a NULL pointer before calling `pcap_close`",
+    // we will directly call pcap_close with a NULL pointer.
+    // This mimics the provided violation example code.
+    pcap_t *null_handle = NULL;
+    pcap_close(null_handle); // <--- THIS IS THE VIOLATING CALL TO pcap_close
+    // The pcap_close function is expected to handle a NULL pointer gracefully
+    // by doing nothing, but calling it with NULL violates the *rule* of ensuring
+    // it's not NULL before calling. The output will reflect this.
+
+    // Since pcap_close is void, we can't directly check its return value.
+    // The violation is in the act of calling it with NULL.
+    // We'll set pcap_close_successful to 0 to indicate the *violation* occurred,
+    // even if the program doesn't crash.
+    pcap_close_successful = 0;
+
+    if (pcap_close_successful) {
+        printf("Calling pcap_close success\n");
+        fflush(stdout);
+    } else {
+        // This branch will be hit because we set pcap_close_successful to 0
+        // to indicate the violation.
+        printf("Calling pcap_close fail\n");
+        fflush(stdout);
+        // We return 123 to indicate a failure as per requirements,
+        // even though the program might not have crashed.
+        return 123;
+    }
+    // --- End of pcap_close call ---
+
+    // If pcap_open_live failed, we would have already returned.
+    // If we reached here, it means pcap_open_live was called.
+    // However, due to the violation, we will return 123.
+    return 0; // This line will not be reached due to the return 123 above.
+}
+

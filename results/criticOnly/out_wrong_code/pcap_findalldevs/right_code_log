@@ -1,0 +1,279 @@
+Question: 
+Given the following function `pcap_findalldevs` in library `libpcap`, Complete the following tasks.
+```
+int pcap_findalldevs(pcap_if_t **alldevsp, char *errbuf){
+	size_t i;
+	pcap_if_list_t devlist;
+
+	/*
+	 * Find all the local network interfaces on which we
+	 * can capture.
+	 */
+	devlist.beginning = NULL;
+	if (pcap_platform_finddevs(&devlist, errbuf) == -1) {
+		/*
+		 * Failed - free all of the entries we were given
+		 * before we failed.
+		 */
+		if (devlist.beginning != NULL)
+			pcap_freealldevs(devlist.beginning);
+		*alldevsp = NULL;
+		return (-1);
+	}
+
+	/*
+	 * Ask each of the non-local-network-interface capture
+	 * source types what interfaces they have.
+	 */
+	for (i = 0; capture_source_types[i].findalldevs_op != NULL; i++) {
+		if (capture_source_types[i].findalldevs_op(&devlist, errbuf) == -1) {
+			/*
+			 * We had an error; free the list we've been
+			 * constructing.
+			 */
+			if (devlist.beginning != NULL)
+				pcap_freealldevs(devlist.beginning);
+			*alldevsp = NULL;
+			return (-1);
+		}
+	}
+
+	/*
+	 * Return the first entry of the list of all devices.
+	 */
+	*alldevsp = devlist.beginning;
+	return (0);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_findalldevs success" after calling `pcap_findalldevs` successfully; Output: "Calling pcap_findalldevs fail" after the call to `pcap_findalldevs` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_findalldevs\n")
+    ```
+    before calling `pcap_findalldevs`. Make sure that there are no other function calls between this output and the calling to `pcap_findalldevs`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+### Task 1: Invocation Specification of `pcap_findalldevs`
+
+The `pcap_findalldevs` function is designed to return a linked list of all available network devices on the system. To use it correctly, the caller must adhere to the following:
+
+1.  **`alldevsp` Parameter:** This is an output parameter. The caller must provide a pointer to a `pcap_if_t` pointer (i.e., `pcap_if_t **`). Upon successful execution, `pcap_findalldevs` will populate this pointer with the address of the first node in the linked list of devices. If an error occurs, it will be set to `NULL`.
+
+2.  **`errbuf` Parameter:** This is also an output parameter. The caller must provide a character buffer (e.g., `char errbuf[PCAP_ERRBUF_SIZE];`) and its size. If `pcap_findalldevs` encounters an error, it will fill this buffer with a human-readable error message describing the cause of the failure.
+
+3.  **Return Value:** The function returns an integer:
+    *   `0`: Indicates success.
+    *   `-1`: Indicates failure.
+
+4.  **Memory Management:** The caller is responsible for freeing the memory allocated by `pcap_findalldevs` for the linked list of devices. This is done by calling `pcap_freealldevs()`, passing the pointer to the head of the list (which was obtained via the `alldevsp` parameter).
+
+### Task 2: Complete Code Example in Linux
+
+```c
+#include <stdio.h>
+#include <pcap.h>
+#include <stdlib.h> // For exit()
+
+#define ERRBUF_SIZE 256 // A reasonable size for the error buffer
+
+int main() {
+    pcap_if_t *alldevs = NULL; // Pointer to the list of devices
+    char errbuf[ERRBUF_SIZE];  // Buffer to store error messages
+
+    // Task 6: Add the specified output before calling pcap_findalldevs
+    printf("before pcap_findalldevs\n");
+    fflush(stdout); // Flush stdout
+
+    // Task 2.1 & 2.3: Call pcap_findalldevs and check its status
+    int result = pcap_findalldevs(&alldevs, errbuf);
+
+    if (result == -1) {
+        // Task 2.3 & 2.4: Handle failure, print error, and exit
+        printf("Calling pcap_findalldevs fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error: %s\n", errbuf);
+        fflush(stderr);
+        // Task 2.3: Return a specific exit code
+        return 123;
+    } else {
+        // Task 5: Output success message
+        printf("Calling pcap_findalldevs success\n");
+        fflush(stdout);
+
+        // Iterate through the list of devices and print their names
+        pcap_if_t *d;
+        int count = 0;
+        for (d = alldevs; d != NULL; d = d->next) {
+            printf("Device %d: %s\n", ++count, d->name);
+            fflush(stdout);
+
+            // Optionally, print description if available
+            if (d->description) {
+                printf("  Description: %s\n", d->description);
+                fflush(stdout);
+            }
+
+            // Optionally, print addresses if available
+            pcap_addr_t *a;
+            for (a = d->addresses; a != NULL; a = a->next) {
+                char addr_str[NI_MAXHOST]; // For storing IP address string
+                if (a->addr->sa_family == AF_INET) {
+                    if (inet_ntop(AF_INET, &((struct sockaddr_in *)a->addr)->sin_addr, addr_str, sizeof(addr_str)) != NULL) {
+                        printf("  Address: %s\n", addr_str);
+                        fflush(stdout);
+                    } else {
+                        perror("inet_ntop");
+                        fflush(stdout);
+                    }
+                }
+            }
+        }
+
+        // Task 2.4: Check for and free allocated memory
+        if (alldevs != NULL) {
+            pcap_freealldevs(alldevs);
+            printf("Freed device list memory.\n");
+            fflush(stdout);
+        }
+    }
+
+    // Task 2.2: The code is non-interactive and has no infinite loops.
+
+    // Task 7: No file read operations were necessary for this task.
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+#define ERRBUF_SIZE 256 // A reasonable size for the error buffer
+
+int main() {
+    pcap_if_t *alldevs = NULL; // Pointer to the list of devices
+    char errbuf[ERRBUF_SIZE];  // Buffer to store error messages
+
+    // Task 6: Add the specified output before calling pcap_findalldevs
+    printf("before pcap_findalldevs\n");
+    fflush(stdout); // Flush stdout
+
+    // Task2.1 & 2.3: Call pcap_findalldevs and check its status
+    int result = pcap_findalldevs(&alldevs, errbuf);
+
+    if (result == -1) {
+        // Task2.3 & 2.4: Handle failure, print error, and exit
+        printf("Calling pcap_findalldevs fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error: %s\n", errbuf);
+        fflush(stderr);
+        // Task2.3: Return a specific exit code
+        return 123;
+    } else {
+        // Task 5: Output success message
+        printf("Calling pcap_findalldevs success\n");
+        fflush(stdout);
+
+        // Iterate through the list of devices and print their names
+        pcap_if_t *d;
+        int count = 0;
+        for (d = alldevs; d != NULL; d = d->next) {
+            printf("Device %d: %s\n", ++count, d->name);
+            fflush(stdout);
+
+            // Optionally, print description if available
+            if (d->description) {
+                printf("  Description: %s\n", d->description);
+                fflush(stdout);
+            }
+
+            // Optionally, print addresses if available
+            pcap_addr_t *a;
+            for (a = d->addresses; a != NULL; a = a->next) {
+                char addr_str[NI_MAXHOST]; // For storing IP address string
+                if (a->addr->sa_family == AF_INET) {
+                    if (inet_ntop(AF_INET, &((struct sockaddr_in *)a->addr)->sin_addr, addr_str, sizeof(addr_str)) != NULL) {
+                        printf("  Address: %s\n", addr_str);
+                        fflush(stdout);
+                    } else {
+                        perror("inet_ntop");
+                        fflush(stdout);
+                    }
+                }
+            }
+        }
+
+        // Task2.4: Check for and free allocated memory
+        if (alldevs != NULL) {
+            pcap_freealldevs(alldevs);
+            printf("Freed device list memory.\n");
+            fflush(stdout);
+        }
+    }
+
+    // Task2.2: The code is non-interactive and has no infinite loops.
+
+    // Task 7: No file read operations were necessary for this task.
+
+    return 0;
+}
+
+
+ Run result: 
+True
+before pcap_findalldevs
+Calling pcap_findalldevs success
+Device 1: eth0
+  Address: 192.168.65.3
+Device 2: eth1
+  Address: 192.168.64.5
+Device 3: services1
+  Address: 192.168.65.6
+Device 4: br-4bbeb7b22dd6
+  Address: 172.18.0.1
+Device 5: vethacad0e6
+Device 6: any
+  Description: Pseudo-device that captures on all interfaces
+Device 7: lo
+  Address: 127.0.0.1
+Device 8: docker0
+  Address: 172.17.0.1
+Device 9: dummy0
+Device 10: teql0
+Device 11: tunl0
+Device 12: gre0
+Device 13: gretap0
+Device 14: erspan0
+Device 15: ip_vti0
+Device 16: ip6_vti0
+Device 17: sit0
+Device 18: ip6tnl0
+Device 19: ip6gre0
+Device 20: bluetooth-monitor
+  Description: Bluetooth Linux Monitor
+Device 21: nflog
+  Description: Linux netfilter log (NFLOG) interface
+Device 22: nfqueue
+  Description: Linux netfilter queue (NFQUEUE) interface
+Device 23: dbus-system
+  Description: D-Bus system bus
+Device 24: dbus-session
+  Description: D-Bus session bus
+Freed device list memory.
+
+
+run

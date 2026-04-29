@@ -1,0 +1,127 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+    int buffer_size_to_set = 1024 * 1024; // Example buffer size
+
+    // Open a dummy device for demonstration. In a real application, you'd open a live interface.
+    // For a non-interactive example, we can try to open a "null" device if available, or a file.
+    // Let's try to open a pcap file. If it doesn't exist, we can still attempt to set options on a handle
+    // that might be created for a non-existent device or an invalid file, as long as it's not activated.
+    // However, pcap_open_live would be a more typical starting point.
+    // For this example, we'll simulate a scenario where we have a pcap_t handle that is NOT activated.
+    // The most straightforward way to get an unactivated pcap_t handle is often through pcap_create and pcap_activate,
+    // but pcap_activate *activates* it.
+    // The prompt specifies a Linux environment. Let's try to create a handle and *not* activate it.
+    // A common way to get an unactivated handle is pcap_create.
+
+    // Let's assume we have a device name. For a non-interactive example, we might not have a live device readily available
+    // or we don't want to interfere with network traffic.
+    // The function pcap_set_buffer_size checks if pcap_check_activated(p) is true.
+    // This means we need a pcap_t *p that is not yet activated.
+
+    // Let's use pcap_create which returns an unactivated handle.
+    // We'll try to create a handle for a non-existent interface to ensure it doesn't get activated immediately.
+    // Or, we can try opening a file. The function pcap_open_offline returns an unactivated handle.
+    // Let's use pcap_open_offline to create an unactivated handle.
+    // If example.pcap doesn't exist, pcap_open_offline might return NULL.
+    // We need a valid pcap_t handle that is NOT activated.
+
+    // A better way to get an unactivated handle for testing pcap_set_buffer_size is to use pcap_create.
+    // Let's create a handle for a dummy interface name.
+    handle = pcap_create("eth0", errbuf); // "eth0" is a common interface name, might not exist.
+    if (handle == NULL) {
+        fprintf(stderr, "pcap_create failed: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("pcap_create succeeded. Handle created but not activated.\n");
+    fflush(stdout);
+
+    // We need to set some compile options for pcap_create to succeed,
+    // for example, snaplen. If pcap_create failed because of no interface or permissions,
+    // we would have already exited.
+    if (pcap_set_snaplen(handle, 262144) < 0) {
+        fprintf(stderr, "pcap_set_snaplen failed: %s\n", pcap_geterr(handle));
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    }
+    printf("pcap_set_snaplen succeeded.\n");
+    fflush(stdout);
+
+    if (pcap_set_promisc(handle, 0) < 0) {
+        fprintf(stderr, "pcap_set_promisc failed: %s\n", pcap_geterr(handle));
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    }
+    printf("pcap_set_promisc succeeded.\n");
+    fflush(stdout);
+
+    if (pcap_set_timeout(handle, 1000) < 0) {
+        fprintf(stderr, "pcap_set_timeout failed: %s\n", pcap_geterr(handle));
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    }
+    printf("pcap_set_timeout succeeded.\n");
+    fflush(stdout);
+
+    // At this point, 'handle' is an unactivated pcap_t.
+
+    printf("before pcap_set_buffer_size\n");
+    fflush(stdout);
+
+    int result = pcap_set_buffer_size(handle, buffer_size_to_set);
+
+    if (result == PCAP_ERROR_ACTIVATED) {
+        fprintf(stderr, "Calling pcap_set_buffer_size fail: Device already activated.\n");
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    } else if (result != 0) {
+        // pcap_set_buffer_size only returns PCAP_ERROR_ACTIVATED or 0.
+        // If it returns anything else, it's likely an internal libpcap issue or an unhandled case.
+        // The provided function definition doesn't have other error return codes for this specific function.
+        fprintf(stderr, "Calling pcap_set_buffer_size fail: Unknown error %d.\n", result);
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    } else {
+        printf("Calling pcap_set_buffer_size success\n");
+        fflush(stdout);
+    }
+
+    // We successfully set the buffer size. Now, to make this a complete, non-looping example,
+    // we should probably activate the handle, or at least demonstrate cleanup.
+    // If we don't activate, setting the buffer size might not have any practical effect until activation.
+    // However, the task is to call pcap_set_buffer_size correctly.
+
+    // For a non-interactive, non-infinite loop, we can choose to activate or just close.
+    // Let's just close to keep it simple and avoid potential permission issues with activation.
+    // If we were to activate, we'd do:
+    /*
+    if (pcap_activate(handle) < 0) {
+        fprintf(stderr, "pcap_activate failed: %s\n", pcap_geterr(handle));
+        fflush(stdout);
+        pcap_close(handle);
+        return 123;
+    }
+    printf("pcap_activate succeeded.\n");
+    fflush(stdout);
+    */
+
+    pcap_close(handle);
+    printf("pcap_close succeeded.\n");
+    fflush(stdout);
+
+    return 0;
+}
+

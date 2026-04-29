@@ -1,0 +1,64 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+
+int main() {
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    const char *dev = pcap_lookupdev(errbuf);
+
+    if (dev == NULL) {
+        fprintf(stderr, "Error: Could not find default network device: %s\n", errbuf);
+        fflush(stdout); // Flushing stdout even though stderr is used for error message
+        return 123;
+    }
+
+    // Open a live capture handle
+    // BUFSIZ is a standard buffer size, 1 for promiscuous mode, 1000ms timeout
+    handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Error: Couldn't open device %s: %s\n", dev, errbuf);
+        fflush(stdout); // Flushing stdout even though stderr is used for error message
+        return 123;
+    }
+
+    // Task2.6: Add the specified printf before calling pcap_snapshot
+    printf("before pcap_snapshot\n");
+    fflush(stdout);
+
+    // Explicitly call the pcap_snapshot API
+    // VIOLATION: Close the handle *before* calling pcap_snapshot.
+    // This makes the 'handle' invalid and points to a closed capture session.
+    pcap_close(handle);
+    handle = NULL; // Explicitly set to NULL after closing for clarity
+
+    int snapshot_value = pcap_snapshot(handle);
+
+    // Task2.5: Check the return value and print the appropriate message
+    // PCAP_ERROR_NOT_ACTIVATED is returned if the handle is not activated.
+    // pcap_open_live *should* activate the handle, but we check anyway.
+    if (snapshot_value == PCAP_ERROR_NOT_ACTIVATED) {
+        printf("Calling pcap_snapshot fail\n");
+        fflush(stdout);
+        // No need to clean up the handle here as it's already closed.
+        return 123;
+    } else {
+        // If snapshot_value is not PCAP_ERROR_NOT_ACTIVATED, it's the snapshot length.
+        printf("Calling pcap_snapshot success\n");
+        fflush(stdout);
+        // Optionally, you could print the snapshot value itself:
+        // printf("Snapshot length is: %d\n", snapshot_value);
+        // fflush(stdout);
+    }
+
+    // Clean up the pcap handle (this will do nothing if handle is NULL)
+    pcap_close(handle);
+
+    return 0;
+}
+

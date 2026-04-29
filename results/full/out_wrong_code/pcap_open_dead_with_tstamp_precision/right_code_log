@@ -1,0 +1,386 @@
+Question: 
+Given the following function `pcap_open_dead_with_tstamp_precision` in library `libpcap`, Complete the following tasks.
+```
+pcap_t *
+pcap_open_dead_with_tstamp_precision(int linktype, int snaplen, u_int precision){
+	pcap_t *p;
+
+	switch (precision) {
+
+	case PCAP_TSTAMP_PRECISION_MICRO:
+	case PCAP_TSTAMP_PRECISION_NANO:
+		break;
+
+	default:
+		/*
+		 * This doesn't really matter, but we don't have any way
+		 * to report particular errors, so the only failure we
+		 * should have is a memory allocation failure.  Just
+		 * pick microsecond precision.
+		 */
+		precision = PCAP_TSTAMP_PRECISION_MICRO;
+		break;
+	}
+	p = malloc(sizeof(*p));
+	if (p == NULL)
+		return NULL;
+	memset (p, 0, sizeof(*p));
+	p->snapshot = snaplen;
+	p->linktype = linktype;
+	p->opt.tstamp_precision = precision;
+	p->can_set_rfmon_op = pcap_can_set_rfmon_dead;
+	p->read_op = pcap_read_dead;
+	p->inject_op = pcap_inject_dead;
+	p->setfilter_op = pcap_setfilter_dead;
+	p->setdirection_op = pcap_setdirection_dead;
+	p->set_datalink_op = pcap_set_datalink_dead;
+	p->getnonblock_op = pcap_getnonblock_dead;
+	p->setnonblock_op = pcap_setnonblock_dead;
+	p->stats_op = pcap_stats_dead;
+#ifdef _WIN32
+	p->stats_ex_op = pcap_stats_ex_dead;
+	p->setbuff_op = pcap_setbuff_dead;
+	p->setmode_op = pcap_setmode_dead;
+	p->setmintocopy_op = pcap_setmintocopy_dead;
+	p->getevent_op = pcap_getevent_dead;
+	p->oid_get_request_op = pcap_oid_get_request_dead;
+	p->oid_set_request_op = pcap_oid_set_request_dead;
+	p->sendqueue_transmit_op = pcap_sendqueue_transmit_dead;
+	p->setuserbuffer_op = pcap_setuserbuffer_dead;
+	p->live_dump_op = pcap_live_dump_dead;
+	p->live_dump_ended_op = pcap_live_dump_ended_dead;
+	p->get_airpcap_handle_op = pcap_get_airpcap_handle_dead;
+#endif
+	p->breakloop_op = pcap_breakloop_dead;
+	p->cleanup_op = pcap_cleanup_dead;
+
+	/*
+	 * A "dead" pcap_t never requires special BPF code generation.
+	 */
+	p->bpf_codegen_flags = 0;
+
+	p->activated = 1;
+	return (p);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_open_dead_with_tstamp_precision success" after calling `pcap_open_dead_with_tstamp_precision` successfully; Output: "Calling pcap_open_dead_with_tstamp_precision fail" after the call to `pcap_open_dead_with_tstamp_precision` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_open_dead_with_tstamp_precision\n")
+    ```
+    before calling `pcap_open_dead_with_tstamp_precision`. Make sure that there are no other function calls between this output and the calling to `pcap_open_dead_with_tstamp_precision`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+## Task 1: Invocation Specification Analysis
+
+The `pcap_open_dead_with_tstamp_precision` function is used to create a "dead" `pcap_t` handle. A "dead" handle is a `pcap_t` structure that doesn't correspond to a real network interface or file. It's primarily used for internal purposes or for testing libpcap functionality without involving live network traffic.
+
+Here's an analysis of the invocation specification:
+
+*   **`linktype`**: This parameter specifies the link-layer type of the packets that would be processed by this handle. It's an integer representing a constant defined in libpcap (e.g., `DLT_EN10MB` for Ethernet). The caller must provide a valid link-layer type.
+
+*   **`snaplen`**: This parameter specifies the snapshot length, which is the maximum number of bytes to capture from each packet. It's an integer. The caller should provide a non-negative value. A common value is `65535` for capturing full packets.
+
+*   **`precision`**: This parameter specifies the desired timestamp precision. It accepts one of two predefined constants:
+    *   `PCAP_TSTAMP_PRECISION_MICRO`: for microsecond precision.
+    *   `PCAP_TSTAMP_PRECISION_NANO`: for nanosecond precision.
+    If an invalid `precision` value is provided, the function defaults to `PCAP_TSTAMP_PRECISION_MICRO`.
+
+**Return Value:**
+
+*   On success, the function returns a pointer to a `pcap_t` structure.
+*   On failure (e.g., memory allocation failure), it returns `NULL`.
+
+**Key Characteristics of "Dead" Handles:**
+
+*   They do not capture any real network traffic.
+*   Many `pcap_t` operations are implemented with "dead" versions (e.g., `pcap_read_dead`, `pcap_inject_dead`) which typically do nothing or return specific error codes.
+*   `pcap_t->activated` is set to `1`, indicating that the handle is considered "activated" even though it's not connected to a real source.
+
+**Invocation Specification Summary:**
+
+The caller needs to provide valid integer values for `linktype`, `snaplen`, and a valid `precision` constant (or accept the default). The function allocates memory for the `pcap_t` structure, so the caller is responsible for eventually calling `pcap_close()` on the returned handle to free the allocated memory.
+
+## Task 2: Complete Linux Code
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pcap.h>
+#include <errno.h> // For errno and strerror
+
+// A dummy function to satisfy the compiler for dead operations, though not strictly needed for this example
+// as pcap_open_dead_with_tstamp_precision assigns its own dead ops.
+// These are usually defined within libpcap itself.
+int pcap_can_set_rfmon_dead(pcap_t *p) { return 0; }
+int pcap_read_dead(pcap_t *p, int cnt, pcap_pkthdr_t *pkthdr, u_char *buf) { return -2; } // -2: error - no data available
+int pcap_inject_dead(pcap_t *p, const void *buf, size_t size) { return -1; } // -1: error
+int pcap_setfilter_dead(pcap_t *p, struct bpf_program *fp) { return -1; }
+int pcap_setdirection_dead(pcap_t *p, pcap_direction_t d) { return -1; }
+int pcap_set_datalink_dead(pcap_t *p, int dlt) { return -1; }
+int pcap_getnonblock_dead(pcap_t *p) { return -1; }
+int pcap_setnonblock_dead(pcap_t *p, int nonblock, char *errbuf) { return -1; }
+int pcap_stats_dead(pcap_t *p, struct pcap_stat *ps) { return -1; }
+
+#ifdef _WIN32
+// Dummy definitions for Windows-specific dead operations
+int pcap_stats_ex_dead(pcap_t *p, struct pcap_stat_ex *ps) { return -1; }
+int pcap_setbuff_dead(pcap_t *p, int size) { return -1; }
+int pcap_setmode_dead(pcap_t *p, pcap_setmode_mode_t mode) { return -1; }
+int pcap_setmintocopy_dead(pcap_t *p, int size) { return -1; }
+void *pcap_getevent_dead(pcap_t *p) { return NULL; }
+int pcap_oid_get_request_dead(pcap_t *p, u_int oid, struct pcap_oid_param *param) { return -1; }
+int pcap_oid_set_request_dead(pcap_t *p, u_int oid, struct pcap_oid_param *param) { return -1; }
+int pcap_sendqueue_transmit_dead(pcap_t *p, pcap_pktlist *pktlist, int sync) { return -1; }
+int pcap_setuserbuffer_dead(pcap_t *p, u_char *buffer, u_int size) { return -1; }
+int pcap_live_dump_dead(pcap_t *p, const char *filename, int max_bytes, int max_packets) { return -1; }
+int pcap_live_dump_ended_dead(pcap_t *p, int callback_ret) { return -1; }
+void *pcap_get_airpcap_handle_dead(pcap_t *p) { return NULL; }
+#endif
+
+void pcap_breakloop_dead(pcap_t *p) {}
+void pcap_cleanup_dead(pcap_t *p) { free(p); }
+
+
+int main() {
+    pcap_t *handle = NULL;
+    int linktype = DLT_EN10MB; // Example: Ethernet link-layer type
+    int snaplen = 65535;      // Example: Snapshot length for full packet capture
+    u_int precision = PCAP_TSTAMP_PRECISION_MICRO; // Example: Microsecond precision
+
+    printf("before pcap_open_dead_with_tstamp_precision\n");
+    fflush(stdout); // Ensure the output is immediately visible
+
+    handle = pcap_open_dead_with_tstamp_precision(linktype, snaplen, precision);
+
+    if (handle == NULL) {
+        fprintf(stderr, "Calling pcap_open_dead_with_tstamp_precision fail\n");
+        fflush(stderr); // Ensure error message is visible
+        return 123;
+    } else {
+        printf("Calling pcap_open_dead_with_tstamp_precision success\n");
+        fflush(stdout); // Ensure the output is immediately visible
+    }
+
+    // Example of using a "dead" handle, typically you wouldn't do much with it.
+    // We will just clean it up.
+
+    // Call cleanup to free the allocated memory
+    if (handle != NULL) {
+        pcap_cleanup_dead(handle);
+        printf("pcap_cleanup_dead called successfully.\n");
+        fflush(stdout);
+    }
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// A dummy function to satisfy the compiler for dead operations, though not strictly needed for this example
+// as pcap_open_dead_with_tstamp_precision assigns its own dead ops.
+// These are usually defined within libpcap itself.
+int pcap_can_set_rfmon_dead(pcap_t *p) { return 0; }
+int pcap_read_dead(pcap_t *p, int cnt, pcap_pkthdr_t *pkthdr, u_char *buf) { return -2; } // -2: error - no data available
+int pcap_inject_dead(pcap_t *p, const void *buf, size_t size) { return -1; } // -1: error
+int pcap_setfilter_dead(pcap_t *p, struct bpf_program *fp) { return -1; }
+int pcap_setdirection_dead(pcap_t *p, pcap_direction_t d) { return -1; }
+int pcap_set_datalink_dead(pcap_t *p, int dlt) { return -1; }
+int pcap_getnonblock_dead(pcap_t *p) { return -1; }
+int pcap_setnonblock_dead(pcap_t *p, int nonblock, char *errbuf) { return -1; }
+int pcap_stats_dead(pcap_t *p, struct pcap_stat *ps) { return -1; }
+
+#ifdef _WIN32
+// Dummy definitions for Windows-specific dead operations
+int pcap_stats_ex_dead(pcap_t *p, struct pcap_stat_ex *ps) { return -1; }
+int pcap_setbuff_dead(pcap_t *p, int size) { return -1; }
+int pcap_setmode_dead(pcap_t *p, pcap_setmode_mode_t mode) { return -1; }
+int pcap_setmintocopy_dead(pcap_t *p, int size) { return -1; }
+void *pcap_getevent_dead(pcap_t *p) { return NULL; }
+int pcap_oid_get_request_dead(pcap_t *p, u_int oid, struct pcap_oid_param *param) { return -1; }
+int pcap_oid_set_request_dead(pcap_t *p, u_int oid, struct pcap_oid_param *param) { return -1; }
+int pcap_sendqueue_transmit_dead(pcap_t *p, pcap_pktlist *pktlist, int sync) { return -1; }
+int pcap_setuserbuffer_dead(pcap_t *p, u_char *buffer, u_int size) { return -1; }
+int pcap_live_dump_dead(pcap_t *p, const char *filename, int max_bytes, int max_packets) { return -1; }
+int pcap_live_dump_ended_dead(pcap_t *p, int callback_ret) { return -1; }
+void *pcap_get_airpcap_handle_dead(pcap_t *p) { return NULL; }
+#endif
+
+void pcap_breakloop_dead(pcap_t *p) {}
+void pcap_cleanup_dead(pcap_t *p) { free(p); }
+
+
+int main() {
+    pcap_t *handle = NULL;
+    int linktype = DLT_EN10MB; // Example: Ethernet link-layer type
+    int snaplen = 65535;      // Example: Snapshot length for full packet capture
+    u_int precision = PCAP_TSTAMP_PRECISION_MICRO; // Example: Microsecond precision
+
+    printf("before pcap_open_dead_with_tstamp_precision\n");
+    fflush(stdout); // Ensure the output is immediately visible
+
+    handle = pcap_open_dead_with_tstamp_precision(linktype, snaplen, precision);
+
+    if (handle == NULL) {
+        fprintf(stderr, "Calling pcap_open_dead_with_tstamp_precision fail\n");
+        fflush(stderr); // Ensure error message is visible
+        return 123;
+    } else {
+        printf("Calling pcap_open_dead_with_tstamp_precision success\n");
+        fflush(stdout); // Ensure the output is immediately visible
+    }
+
+    // Example of using a "dead" handle, typically you wouldn't do much with it.
+    // We will just clean it up.
+
+    // Call cleanup to free the allocated memory
+    if (handle != NULL) {
+        pcap_cleanup_dead(handle);
+        printf("pcap_cleanup_dead called successfully.\n");
+        fflush(stdout);
+    }
+
+    return 0;
+}
+
+
+ Run result: 
+False
+
+I0423 14:26:08.910726 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911488 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911580 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911591 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911593 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911596 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911598 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911600 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911602 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911605 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911607 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911609 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911611 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911612 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911614 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911616 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911618 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911620 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911623 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911625 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911627 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911629 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911631 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911633 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911635 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911637 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911638 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911640 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911642 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911644 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911646 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911648 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911649 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911651 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911653 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911655 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911658 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911660 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911661 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911663 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911665 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911667 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911669 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911671 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911673 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911675 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911676 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911678 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911680 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911682 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911684 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911686 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911688 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911690 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911691 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911693 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911695 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911697 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911699 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911701 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911703 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911705 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911707 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911708 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911710 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911712 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911714 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911716 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911718 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911720 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911722 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911724 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911727 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911729 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911731 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911733 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911735 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911737 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911738 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911740 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911742 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911744 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911746 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911748 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911749 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911751 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911753 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911755 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911757 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911759 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911761 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911762 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911764 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911766 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911768 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911770 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911772 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911774 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911776 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911777 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911779 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911781 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911783 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911785 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911787 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911788 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911790 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911792 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911794 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911796 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911798 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0423 14:26:08.911800 15333193 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+pcap_open_dead_with_tstamp_precision.c:12:40: error: unknown type name 'pcap_pkthdr_t'; did you mean 'pcap_addr_t'?
+   12 | int pcap_read_dead(pcap_t *p, int cnt, pcap_pkthdr_t *pkthdr, u_char *buf) { return -2; } // -2: error - no data available
+      |                                        ^~~~~~~~~~~~~
+      |                                        pcap_addr_t
+
+compile
+Break cant parse code. token_right: 25278. Token_one: 2924
+Answer: 

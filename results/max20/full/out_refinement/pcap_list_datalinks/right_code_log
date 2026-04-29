@@ -1,0 +1,234 @@
+Question: 
+Given the following function `pcap_list_datalinks` in library `libpcap`, Complete the following tasks.
+```
+int pcap_list_datalinks(pcap_t *p, int **dlt_buffer){
+	if (!p->activated)
+		return (PCAP_ERROR_NOT_ACTIVATED);
+	if (p->dlt_count == 0) {
+		/*
+		 * We couldn't fetch the list of DLTs, which means
+		 * this platform doesn't support changing the
+		 * DLT for an interface.  Return a list of DLTs
+		 * containing only the DLT this device supports.
+		 */
+		*dlt_buffer = (int*)malloc(sizeof(**dlt_buffer));
+		if (*dlt_buffer == NULL) {
+			pcap_fmt_errmsg_for_errno(p->errbuf, sizeof(p->errbuf),
+			    errno, "malloc");
+			return (PCAP_ERROR);
+		}
+		**dlt_buffer = p->linktype;
+		return (1);
+	} else {
+		*dlt_buffer = (int*)calloc(sizeof(**dlt_buffer), p->dlt_count);
+		if (*dlt_buffer == NULL) {
+			pcap_fmt_errmsg_for_errno(p->errbuf, sizeof(p->errbuf),
+			    errno, "malloc");
+			return (PCAP_ERROR);
+		}
+		(void)memcpy(*dlt_buffer, p->dlt_list,
+		    sizeof(**dlt_buffer) * p->dlt_count);
+		return (p->dlt_count);
+	}
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_list_datalinks success" after calling `pcap_list_datalinks` successfully; Output: "Calling pcap_list_datalinks fail" after the call to `pcap_list_datalinks` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_list_datalinks\n")
+    ```
+    before calling `pcap_list_datalinks`. Make sure that there are no other function calls between this output and the calling to `pcap_list_datalinks`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+## Task 1: Invocation Specification for `pcap_list_datalinks`
+
+The caller of `pcap_list_datalinks` must adhere to the following specifications:
+
+1.  **`pcap_t *p`**: The first argument must be a valid pointer to an initialized `pcap_t` structure. This structure is typically obtained by calling `pcap_open_live` or `pcap_open_offline`. The `pcap_t` structure must be activated (i.e., `p->activated` must be true).
+2.  **`int **dlt_buffer`**: The second argument must be a pointer to a pointer to an integer. This is where `pcap_list_datalinks` will allocate memory to store the list of data link types (DLTs). The caller is responsible for:
+    *   Providing a valid address for a pointer.
+    *   **Freeing the memory allocated by `pcap_list_datalinks` after it's no longer needed** to prevent memory leaks. This should be done using `free(*dlt_buffer)`.
+3.  **Return Value**: The function returns an integer representing the number of DLTs in the buffer, or a negative value indicating an error.
+    *   **Positive value**: The number of DLTs successfully retrieved. The caller can then access the DLTs through `*dlt_buffer`.
+    *   **`PCAP_ERROR_NOT_ACTIVATED`**: If the `pcap_t` structure is not activated.
+    *   **`PCAP_ERROR`**: If an error occurred during memory allocation or another internal issue. In this case, `p->errbuf` will contain a more detailed error message.
+
+## Task 2: Complete Code Example in Linux
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <pcap.h>
+#include <errno.h>
+#include <string.h>
+
+// Function to print error messages with flushing
+void print_and_flush(const char *message) {
+    printf("%s\n", message);
+    fflush(stdout);
+}
+
+int main() {
+    pcap_t *handle = NULL;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int *dlt_list = NULL;
+    int num_datalinks = 0;
+    const char *device = pcap_lookupdev(errbuf); // Get a default device
+
+    if (device == NULL) {
+        print_and_flush("Error finding default device: ");
+        print_and_flush(errbuf);
+        return 123;
+    }
+
+    // Open a live capture handle
+    handle = pcap_open_live(device, BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        print_and_flush("Error opening interface: ");
+        print_and_flush(errbuf);
+        return 123;
+    }
+    print_and_flush("Successfully opened pcap handle.");
+
+    // --- Calling pcap_list_datalinks ---
+    printf("before pcap_list_datalinks\n");
+    fflush(stdout);
+
+    num_datalinks = pcap_list_datalinks(handle, &dlt_list);
+
+    if (num_datalinks < 0) {
+        print_and_flush("Calling pcap_list_datalinks fail");
+        print_and_flush("pcap_list_datalinks error: ");
+        print_and_flush(pcap_geterr(handle)); // Use pcap_geterr for pcap_t related errors
+        pcap_close(handle);
+        return 123;
+    } else {
+        print_and_flush("Calling pcap_list_datalinks success");
+    }
+    // --- End of pcap_list_datalinks call ---
+
+    if (num_datalinks > 0 && dlt_list != NULL) {
+        printf("Number of supported datalinks: %d\n", num_datalinks);
+        fflush(stdout);
+        printf("Supported DLTs:\n");
+        fflush(stdout);
+        for (int i = 0; i < num_datalinks; ++i) {
+            printf("  DLT: %d (%s)\n", dlt_list[i], pcap_datalink_val_to_name(dlt_list[i]));
+            fflush(stdout);
+        }
+        // Free the allocated buffer
+        free(dlt_list);
+        dlt_list = NULL; // Set to NULL to avoid dangling pointer
+    } else if (num_datalinks == 0) {
+        printf("No datalinks reported, which might indicate platform limitations.\n");
+        fflush(stdout);
+    }
+
+    // Close the pcap handle
+    pcap_close(handle);
+    print_and_flush("Pcap handle closed.");
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Function to print error messages with flushing
+void print_and_flush(const char *message) {
+    printf("%s\n", message);
+    fflush(stdout);
+}
+
+int main() {
+    pcap_t *handle = NULL;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int *dlt_list = NULL;
+    int num_datalinks = 0;
+    const char *device = pcap_lookupdev(errbuf); // Get a default device
+
+    if (device == NULL) {
+        print_and_flush("Error finding default device: ");
+        print_and_flush(errbuf);
+        return 123;
+    }
+
+    // Open a live capture handle
+    handle = pcap_open_live(device, BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        print_and_flush("Error opening interface: ");
+        print_and_flush(errbuf);
+        return 123;
+    }
+    print_and_flush("Successfully opened pcap handle.");
+
+    // --- Calling pcap_list_datalinks ---
+    printf("before pcap_list_datalinks\n");
+    fflush(stdout);
+
+    num_datalinks = pcap_list_datalinks(handle, &dlt_list);
+
+    if (num_datalinks < 0) {
+        print_and_flush("Calling pcap_list_datalinks fail");
+        print_and_flush("pcap_list_datalinks error: ");
+        print_and_flush(pcap_geterr(handle)); // Use pcap_geterr for pcap_t related errors
+        pcap_close(handle);
+        return 123;
+    } else {
+        print_and_flush("Calling pcap_list_datalinks success");
+    }
+    // --- End of pcap_list_datalinks call ---
+
+    if (num_datalinks > 0 && dlt_list != NULL) {
+        printf("Number of supported datalinks: %d\n", num_datalinks);
+        fflush(stdout);
+        printf("Supported DLTs:\n");
+        fflush(stdout);
+        for (int i = 0; i < num_datalinks; ++i) {
+            printf("  DLT: %d (%s)\n", dlt_list[i], pcap_datalink_val_to_name(dlt_list[i]));
+            fflush(stdout);
+        }
+        // Free the allocated buffer
+        free(dlt_list);
+        dlt_list = NULL; // Set to NULL to avoid dangling pointer
+    } else if (num_datalinks == 0) {
+        printf("No datalinks reported, which might indicate platform limitations.\n");
+        fflush(stdout);
+    }
+
+    // Close the pcap handle
+    pcap_close(handle);
+    print_and_flush("Pcap handle closed.");
+
+    return 0;
+}
+
+
+ Run result: 
+True
+Successfully opened pcap handle.
+before pcap_list_datalinks
+Calling pcap_list_datalinks success
+Number of supported datalinks: 2
+Supported DLTs:
+  DLT: 1 (EN10MB)
+  DLT: 143 (DOCSIS)
+Pcap handle closed.
+
+
+run

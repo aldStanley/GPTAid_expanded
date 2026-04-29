@@ -1,0 +1,111 @@
+
+Question: 
+Given the following function `pcap_set_promisc` in library `libpcap`, Complete the following tasks.
+```
+int pcap_set_promisc(pcap_t *p, int promisc){
+	if (pcap_check_activated(p))
+		return (PCAP_ERROR_ACTIVATED);
+	p->opt.promisc = promisc;
+	return (0);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_set_promisc success" after calling `pcap_set_promisc` successfully; Output: "Calling pcap_set_promisc fail" after the call to `pcap_set_promisc` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_set_promisc\n")
+    ```
+    before calling `pcap_set_promisc`. Make sure that there are no other function calls between this output and the calling to `pcap_set_promisc`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+
+Answer: 
+## Analysis of `pcap_set_promisc`
+
+The `pcap_set_promisc` function takes two arguments:
+
+1.  `pcap_t *p`: A pointer to a `pcap_t` structure, which represents an open network interface for packet capture.
+2.  `int promisc`: An integer flag. A non-zero value (typically 1) enables promiscuous mode, and 0 disables it.
+
+**Invocation Specification:**
+
+The crucial invocation specification for `pcap_set_promisc` is that **the `pcap_t` structure must not be activated yet.** The function explicitly checks this with `pcap_check_activated(p)`. If the `pcap_t` structure has already been activated (e.g., by calling `pcap_open_live` and then `pcap_setfilter` or `pcap_set_snaplen` after activation), `pcap_set_promisc` will return `PCAP_ERROR_ACTIVATED`.
+
+Therefore, to call `pcap_set_promisc` successfully, you must:
+
+1.  Obtain a `pcap_t` handle. This is typically done using `pcap_open_live`.
+2.  Call `pcap_set_promisc` **before** any operations that might implicitly or explicitly activate the capture (like starting the capture loop with `pcap_loop` or `pcap_next_ex`).
+
+**Error Handling:**
+
+*   If `pcap_check_activated(p)` returns a non-zero value (indicating activation), `pcap_set_promisc` returns `PCAP_ERROR_ACTIVATED`.
+*   If the call is successful, it returns `0`.
+
+## Complete Code Example
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <pcap.h>
+
+#define ERROR_EXIT_CODE 123
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+    const char *interface = "eth0"; // Replace with a valid network interface on your system
+
+    // 1. Open a network interface for live capture.
+    // This call typically returns an unactivated pcap_t handle.
+    handle = pcap_open_live(interface, BUFSIZ, 0, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening interface %s: %s\n", interface, errbuf);
+        fflush(stdout);
+        return ERROR_EXIT_CODE;
+    }
+    printf("Successfully opened interface %s.\n", interface);
+    fflush(stdout);
+
+    // 2. Set promiscuous mode before activation.
+    int promisc_mode = 1; // Enable promiscuous mode
+    printf("before pcap_set_promisc\n");
+    fflush(stdout);
+
+    int set_promisc_result = pcap_set_promisc(handle, promisc_mode);
+    if (set_promisc_result != 0) {
+        fprintf(stderr, "Calling pcap_set_promisc fail: ");
+        fflush(stdout);
+        if (set_promisc_result == PCAP_ERROR_ACTIVATED) {
+            fprintf(stderr, "pcap_set_promisc called on an activated handle.\n");
+            fflush(stdout);
+        } else {
+            fprintf(stderr, "Unknown error setting promiscuous mode.\n");
+            fflush(stdout);
+        }
+        pcap_close(handle);
+        return ERROR_EXIT_CODE;
+    }
+    printf("Calling pcap_set_promisc success\n");
+    fflush(stdout);
+
+    // For demonstration, we can now activate the capture or do other operations.
+    // A simple example: set a filter. This would typically happen after setting options like promiscuous mode.
+    // For a truly minimal example that doesn't loop, we'll just close it.
+    // If you wanted to capture, you would then use pcap_loop or pcap_next_ex.
+
+    // 3. Close the pcap handle.
+    pcap_close(handle);
+    printf("Successfully closed the pcap handle.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```

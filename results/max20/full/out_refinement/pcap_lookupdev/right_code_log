@@ -1,0 +1,244 @@
+Question: 
+Given the following function `pcap_lookupdev` in library `libpcap`, Complete the following tasks.
+```
+char *
+pcap_lookupdev(char *errbuf){
+	pcap_if_t *alldevs;
+#ifdef _WIN32
+  /*
+   * Windows - use the same size as the old WinPcap 3.1 code.
+   * XXX - this is probably bigger than it needs to be.
+   */
+  #define IF_NAMESIZE 8192
+#else
+  /*
+   * UN*X - use the system's interface name size.
+   * XXX - that might not be large enough for capture devices
+   * that aren't regular network interfaces.
+   */
+#endif
+	static char device[IF_NAMESIZE + 1];
+	char *ret;
+
+	/*
+	 * We disable this in "new API" mode, because 1) in WinPcap/Npcap,
+	 * it may return UTF-16 strings, for backwards-compatibility
+	 * reasons, and we're also disabling the hack to make that work,
+	 * for not-going-past-the-end-of-a-string reasons, and 2) we
+	 * want its behavior to be consistent.
+	 *
+	 * In addition, it's not thread-safe, so we've marked it as
+	 * deprecated.
+	 */
+	if (pcap_new_api) {
+		snprintf(errbuf, PCAP_ERRBUF_SIZE,
+		    "pcap_lookupdev() is deprecated and is not supported in programs calling pcap_init()");
+		return (NULL);
+	}
+
+	if (pcap_findalldevs(&alldevs, errbuf) == -1)
+		return (NULL);
+
+	if (alldevs == NULL || (alldevs->flags & PCAP_IF_LOOPBACK)) {
+		/*
+		 * There are no devices on the list, or the first device
+		 * on the list is a loopback device, which means there
+		 * are no non-loopback devices on the list.  This means
+		 * we can't return any device.
+		 *
+		 * XXX - why not return a loopback device?  If we can't
+		 * capture on it, it won't be on the list, and if it's
+		 * on the list, there aren't any non-loopback devices,
+		 * so why not just supply it as the default device?
+		 */
+		(void)pcap_strlcpy(errbuf, "no suitable device found",
+		    PCAP_ERRBUF_SIZE);
+		ret = NULL;
+	} else {
+		/*
+		 * Return the name of the first device on the list.
+		 */
+		(void)pcap_strlcpy(device, alldevs->name, sizeof(device));
+		ret = device;
+	}
+
+	pcap_freealldevs(alldevs);
+	return (ret);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_lookupdev success" after calling `pcap_lookupdev` successfully; Output: "Calling pcap_lookupdev fail" after the call to `pcap_lookupdev` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_lookupdev\n")
+    ```
+    before calling `pcap_lookupdev`. Make sure that there are no other function calls between this output and the calling to `pcap_lookupdev`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+### Task 1: Invocation Specification Analysis
+
+The `pcap_lookupdev` function has the following invocation specification that the caller needs to follow:
+
+1.  **Error Buffer:** The function requires a `char *errbuf` argument. This buffer is used to store an error message if an error occurs during the execution of `pcap_lookupdev`. The caller is responsible for allocating a sufficiently large buffer for `errbuf` (at least `PCAP_ERRBUF_SIZE`).
+
+2.  **New API Mode:** The function is deprecated and **not supported** if `pcap_init()` has been called, which indicates the "new API" mode of libpcap. If `pcap_new_api` is true (indicating new API mode), `pcap_lookupdev` will immediately return `NULL` and populate `errbuf` with a message indicating its deprecation.
+
+3.  **Return Value:**
+    *   If successful, `pcap_lookupdev` returns a `char *` pointing to the name of a suitable network device. This returned pointer points to an internal static buffer within `libpcap`. The caller should treat this as read-only and not modify it.
+    *   If it fails (e.g., no suitable device found, error during device enumeration, or called in new API mode), it returns `NULL`. The `errbuf` will contain a descriptive error message.
+
+4.  **Thread Safety:** The function is **not thread-safe**. Its internal use of a static buffer makes it unsuitable for concurrent calls from multiple threads.
+
+5.  **Device Selection Logic:**
+    *   It first calls `pcap_findalldevs` to get a list of all available network devices.
+    *   If `pcap_findalldevs` fails, `pcap_lookupdev` returns `NULL`.
+    *   If the list of devices is empty (`alldevs == NULL`), or if the first device in the list is a loopback device (`alldevs->flags & PCAP_IF_LOOPBACK`), it considers no suitable device to be found and returns `NULL`.
+    *   Otherwise, it returns the name of the first non-loopback device found in the list.
+
+### Task 2: Complete Code for Linux
+
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h> // For snprintf
+
+// Assume pcap_new_api is globally accessible or defined elsewhere,
+// for the purpose of this example, we'll assume it's defined.
+// In a real scenario, you'd need to know how it's managed by libpcap.
+// For this example, let's simulate it as if it's NOT set.
+// extern int pcap_new_api; // If it's truly global and defined elsewhere.
+// For a self-contained example, we can simulate:
+int pcap_new_api = 0; // Set to 0 to indicate old API mode.
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    char *dev;
+
+    // Ensure the errbuf is clear before use
+    memset(errbuf, 0, PCAP_ERRBUF_SIZE);
+
+    printf("before pcap_lookupdev\n");
+    fflush(stdout); // Flush stdout after the printf
+
+    dev = pcap_lookupdev(errbuf);
+
+    if (dev == NULL) {
+        printf("Calling pcap_lookupdev fail\n");
+        fflush(stdout); // Flush stdout after the printf
+        fprintf(stderr, "Error from pcap_lookupdev: %s\n", errbuf);
+        fflush(stderr); // Flush stderr after the fprintf
+        return 123;
+    } else {
+        printf("Calling pcap_lookupdev success\n");
+        fflush(stdout); // Flush stdout after the printf
+        printf("Found device: %s\n", dev);
+        fflush(stdout); // Flush stdout after the printf
+    }
+
+    // Example of using the found device with pcap_open_live (optional)
+    // This part is not strictly required by the prompt but demonstrates
+    // a typical next step.
+    pcap_t *handle;
+    int snaplen = 1024;
+    int promisc = 0; // Not promiscuous mode
+    int to_ms = 1000; // Timeout in milliseconds
+
+    handle = pcap_open_live(dev, snaplen, promisc, to_ms, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Could not open device %s: %s\n", dev, errbuf);
+        fflush(stderr); // Flush stderr after the fprintf
+        return 123;
+    } else {
+        printf("Successfully opened device %s for live capture.\n", dev);
+        fflush(stdout); // Flush stdout after the printf
+    }
+
+    pcap_close(handle);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Assume pcap_new_api is globally accessible or defined elsewhere,
+// for the purpose of this example, we'll assume it's defined.
+// In a real scenario, you'd need to know how it's managed by libpcap.
+// For this example, let's simulate it as if it's NOT set.
+// extern int pcap_new_api; // If it's truly global and defined elsewhere.
+// For a self-contained example, we can simulate:
+int pcap_new_api = 0; // Set to 0 to indicate old API mode.
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    char *dev;
+
+    // Ensure the errbuf is clear before use
+    memset(errbuf, 0, PCAP_ERRBUF_SIZE);
+
+    printf("before pcap_lookupdev\n");
+    fflush(stdout); // Flush stdout after the printf
+
+    dev = pcap_lookupdev(errbuf);
+
+    if (dev == NULL) {
+        printf("Calling pcap_lookupdev fail\n");
+        fflush(stdout); // Flush stdout after the printf
+        fprintf(stderr, "Error from pcap_lookupdev: %s\n", errbuf);
+        fflush(stderr); // Flush stderr after the fprintf
+        return 123;
+    } else {
+        printf("Calling pcap_lookupdev success\n");
+        fflush(stdout); // Flush stdout after the printf
+        printf("Found device: %s\n", dev);
+        fflush(stdout); // Flush stdout after the printf
+    }
+
+    // Example of using the found device with pcap_open_live (optional)
+    // This part is not strictly required by the prompt but demonstrates
+    // a typical next step.
+    pcap_t *handle;
+    int snaplen = 1024;
+    int promisc = 0; // Not promiscuous mode
+    int to_ms = 1000; // Timeout in milliseconds
+
+    handle = pcap_open_live(dev, snaplen, promisc, to_ms, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Could not open device %s: %s\n", dev, errbuf);
+        fflush(stderr); // Flush stderr after the fprintf
+        return 123;
+    } else {
+        printf("Successfully opened device %s for live capture.\n", dev);
+        fflush(stdout); // Flush stdout after the printf
+    }
+
+    pcap_close(handle);
+
+    return 0;
+}
+
+
+ Run result: 
+True
+before pcap_lookupdev
+Calling pcap_lookupdev success
+Found device: eth0
+Successfully opened device eth0 for live capture.
+
+
+run

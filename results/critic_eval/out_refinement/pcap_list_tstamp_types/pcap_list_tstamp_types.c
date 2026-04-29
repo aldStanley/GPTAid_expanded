@@ -1,0 +1,125 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+    int *tstamp_types = NULL;
+    int num_tstamp_types;
+
+    // Open a network device for live capture.
+    // In a real application, you'd want to choose a specific device
+    // or use pcap_findalldevs to list available devices.
+    // For this example, we'll try to open the first available device.
+    // If no device is found, pcap_open_live will return NULL.
+    handle = pcap_open_live("eth0", BUFSIZ, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Couldn't open device: %s\n", errbuf);
+        fflush(stderr);
+        return 123;
+    }
+    printf("Successfully opened network device.\n");
+    fflush(stdout);
+
+    // Initialize tstamp_type_count and tstamp_type_list for demonstration purposes
+    // In a real scenario, these would be populated by libpcap based on the device capabilities.
+    // For this example, we'll simulate a device that *does* support multiple timestamp types.
+    // If your device doesn't support multiple types, the first branch of pcap_list_tstamp_types
+    // would be taken.
+    
+    // The original code had an issue with declaring 'temp_p' of type pcap_t directly.
+    // pcap_t is an opaque structure, and its internal members should not be directly accessed or initialized like this.
+    // Instead, we need to ensure that 'p->tstamp_type_count' and 'p->tstamp_type_list' are correctly
+    // populated *before* calling pcap_list_tstamp_types.
+    // However, pcap_list_tstamp_types is designed to *retrieve* this information from an *already opened* pcap handle.
+    // For the purpose of *demonstrating* pcap_list_tstamp_types, we will simulate the state that libpcap
+    // *would* have set if it supported multiple timestamp types. This requires a slight deviation from
+    // directly using pcap_open_live, as pcap_open_live might not populate these fields as expected
+    // for a generic example without specific device context.
+
+    // A more robust way to test this function would be to use pcap_set_tstamp_type
+    // to set the desired timestamp type *before* calling pcap_list_tstamp_types if we
+    // were testing setting a type. However, pcap_list_tstamp_types is for *listing*
+    // supported types.
+
+    // To correctly simulate the scenario where p->tstamp_type_count > 0, we need a pcap_t handle.
+    // The provided function itself populates *tstamp_typesp if p->tstamp_type_count is 0.
+    // If p->tstamp_type_count is > 0, it copies from p->tstamp_type_list.
+    // This means we need a handle 'p' where p->tstamp_type_count is NOT zero.
+
+    // Let's re-evaluate the scenario:
+    // If pcap_open_live (or other opening functions) finds multiple supported types,
+    // it will populate p->tstamp_type_count and p->tstamp_type_list.
+    // If it finds only one supported type (the default PCAP_TSTAMP_HOST),
+    // p->tstamp_type_count will be 0.
+
+    // For demonstration, we can try to set the timestamp type to something other than host
+    // if the device supports it, and then list them.
+    
+    // Let's try to set a different timestamp type and see what pcap_list_tstamp_types reports.
+    // This will implicitly test the `else` block if the adapter supports it.
+    int status;
+    
+    // Try to find supported types first. If it returns > 0, it means adapter supports it.
+    status = pcap_list_tstamp_types(handle, &tstamp_types);
+
+    // If status > 0, it means p->tstamp_type_count was > 0 and the types were copied.
+    // If status == 0, it means p->tstamp_type_count was 0 and PCAP_TSTAMP_HOST was assigned.
+    // If status < 0, it's an error.
+
+    // We need to clear the previously allocated memory if `pcap_list_tstamp_types` was called and returned >0
+    if (tstamp_types != NULL) {
+        free(tstamp_types);
+        tstamp_types = NULL;
+    }
+    
+    // Reset tstamp_types to NULL before the actual call we want to analyze.
+    // The 'handle' from pcap_open_live will have its internal fields populated.
+    // The behavior of pcap_list_tstamp_types depends on the *actual* capabilities of the device
+    // opened by pcap_open_live.
+
+    // Task 6: Add the required printf statement before the function call.
+    printf("before pcap_list_tstamp_types\n");
+    fflush(stdout);
+
+    // Call pcap_list_tstamp_types
+    // The *handle* itself has the internal state. We don't need a separate temp_p.
+    num_tstamp_types = pcap_list_tstamp_types(handle, &tstamp_types);
+
+    // Task 5: Check the call status and output accordingly.
+    if (num_tstamp_types < 0) {
+        fprintf(stderr, "Calling pcap_list_tstamp_types fail: %s\n", errbuf);
+        fflush(stderr);
+        pcap_close(handle);
+        return 123;
+    } else {
+        printf("Calling pcap_list_tstamp_types success\n");
+        fflush(stdout);
+
+        // Task2: Print the supported timestamp types
+        printf("Supported timestamp types (%d):\n", num_tstamp_types);
+        fflush(stdout);
+        for (int i = 0; i < num_tstamp_types; i++) {
+            printf("  Type %d: %d\n", i, tstamp_types[i]);
+            fflush(stdout);
+        }
+
+        // Clean up allocated memory by pcap_list_tstamp_types
+        if (tstamp_types != NULL) {
+            free(tstamp_types);
+            tstamp_types = NULL;
+        }
+    }
+
+    // Close the network device
+    pcap_close(handle);
+    printf("Network device closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+

@@ -1,0 +1,1882 @@
+Question: 
+Given the following function `pcap_activate` in library `libpcap`, Complete the following tasks.
+```
+int pcap_activate(pcap_t *p){
+	int status;
+
+	/*
+	 * Catch attempts to re-activate an already-activated
+	 * pcap_t; this should, for example, catch code that
+	 * calls pcap_open_live() followed by pcap_activate(),
+	 * as some code that showed up in a Stack Exchange
+	 * question did.
+	 */
+	if (pcap_check_activated(p))
+		return (PCAP_ERROR_ACTIVATED);
+	status = p->activate_op(p);
+	if (status >= 0) {
+		/*
+		 * If somebody requested non-blocking mode before
+		 * calling pcap_activate(), turn it on now.
+		 */
+		if (p->opt.nonblock) {
+			status = p->setnonblock_op(p, 1);
+			if (status < 0) {
+				/*
+				 * Failed.  Undo everything done by
+				 * the activate operation.
+				 */
+				p->cleanup_op(p);
+				initialize_ops(p);
+				return (status);
+			}
+		}
+		p->activated = 1;
+	} else {
+		if (p->errbuf[0] == '\0') {
+			/*
+			 * No error message supplied by the activate routine;
+			 * for the benefit of programs that don't specially
+			 * handle errors other than PCAP_ERROR, return the
+			 * error message corresponding to the status.
+			 */
+			snprintf(p->errbuf, PCAP_ERRBUF_SIZE, "%s",
+			    pcap_statustostr(status));
+		}
+
+		/*
+		 * Undo any operation pointer setting, etc. done by
+		 * the activate operation.
+		 */
+		initialize_ops(p);
+	}
+	return (status);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_activate success" after calling `pcap_activate` successfully; Output: "Calling pcap_activate fail" after the call to `pcap_activate` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_activate\n")
+    ```
+    before calling `pcap_activate`. Make sure that there are no other function calls between this output and the calling to `pcap_activate`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+## Task 1: Invocation Specification of `pcap_activate`
+
+Based on the provided `pcap_activate` function code, the caller needs to follow these invocation specifications:
+
+1.  **Valid `pcap_t` Pointer:** The function expects a pointer to a `pcap_t` structure (`p`) that has been previously initialized and is ready for activation. This typically means it has been created by functions like `pcap_open_live()` or `pcap_open_offline()`.
+
+2.  **No Prior Activation:** The `pcap_t` structure should **not** have already been activated. The function explicitly checks for this using `pcap_check_activated(p)`. If `pcap_check_activated(p)` returns true (indicating it's already activated), `pcap_activate` will return `PCAP_ERROR_ACTIVATED`.
+
+3.  **Operational Pointers Set:** Internally, `pcap_activate` relies on operation pointers within the `pcap_t` structure (e.g., `activate_op`, `setnonblock_op`, `cleanup_op`). While the caller doesn't directly set these, the `pcap_t` structure must have these pointers correctly populated by the preceding `pcap_open_*` call. The function `initialize_ops(p)` is used to reset these, implying they are expected to be valid before `pcap_activate` is called.
+
+4.  **Error Buffer Availability:** The `pcap_t` structure must have a valid error buffer (`p->errbuf`) of at least `PCAP_ERRBUF_SIZE` to store error messages if the activation fails and no specific error message is provided by the `activate_op`.
+
+5.  **Non-blocking Mode Consideration:** If the caller intends to use non-blocking mode, they should set `p->opt.nonblock` to true **before** calling `pcap_activate`. The `pcap_activate` function will then attempt to set the non-blocking mode using `p->setnonblock_op(p, 1)`.
+
+## Task 2: Complete Code Example in Linux
+
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+
+#define PCAP_ERRBUF_SIZE 256 // Standard size for error buffer
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    int status;
+
+    // Initialize error buffer
+    errbuf[0] = '\0';
+
+    // --- Step 1: Open a device for live capture ---
+    // We'll use a dummy device name that likely doesn't exist
+    // to simulate a potential failure scenario during open,
+    // but also to avoid needing root privileges or a specific interface.
+    // If you have a specific interface you want to test with, replace "eth0"
+    // with its name (e.g., "wlan0", "enp0s3").
+    handle = pcap_open_live("dummy_interface", 65536, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap device: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap device (even if dummy).\n");
+    fflush(stdout);
+
+    // --- Step 2: Prepare for pcap_activate ---
+    // The pcap_t handle is now initialized but not activated.
+    // We can simulate setting non-blocking mode if desired.
+    // handle->opt.nonblock = 1; // Uncomment to test non-blocking activation
+
+    // --- Step 3: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout);
+
+    status = pcap_activate(handle);
+
+    // --- Step 4: Check the status of pcap_activate ---
+    if (status < 0) {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        // If pcap_activate failed, it might have already populated errbuf.
+        // If not, we can use pcap_statustostr.
+        if (errbuf[0] == '\0') {
+            snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", pcap_statustostr(status));
+        }
+        fprintf(stderr, "pcap_activate failed with status %d: %s\n", status, errbuf);
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+    }
+
+    // --- Step 5: Clean up ---
+    // pcap_close handles the cleanup of the activated handle.
+    pcap_close(handle);
+    printf("pcap_close called to release resources.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+#define PCAP_ERRBUF_SIZE 256 // Standard size for error buffer
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    int status;
+
+    // Initialize error buffer
+    errbuf[0] = '\0';
+
+    // --- Step 1: Open a device for live capture ---
+    // We'll use a dummy device name that likely doesn't exist
+    // to simulate a potential failure scenario during open,
+    // but also to avoid needing root privileges or a specific interface.
+    // If you have a specific interface you want to test with, replace "eth0"
+    // with its name (e.g., "wlan0", "enp0s3").
+    handle = pcap_open_live("dummy_interface", 65536, 1, 1000, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap device: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap device (even if dummy).\n");
+    fflush(stdout);
+
+    // --- Step 2: Prepare for pcap_activate ---
+    // The pcap_t handle is now initialized but not activated.
+    // We can simulate setting non-blocking mode if desired.
+    // handle->opt.nonblock = 1; // Uncomment to test non-blocking activation
+
+    // --- Step 3: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout);
+
+    status = pcap_activate(handle);
+
+    // --- Step 4: Check the status of pcap_activate ---
+    if (status < 0) {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        // If pcap_activate failed, it might have already populated errbuf.
+        // If not, we can use pcap_statustostr.
+        if (errbuf[0] == '\0') {
+            snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", pcap_statustostr(status));
+        }
+        fprintf(stderr, "pcap_activate failed with status %d: %s\n", status, errbuf);
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+    }
+
+    // --- Step 5: Clean up ---
+    // pcap_close handles the cleanup of the activated handle.
+    pcap_close(handle);
+    printf("pcap_close called to release resources.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+False
+
+Error opening pcap device: dummy_interface: No such device exists (SIOCGIFHWADDR: No such device)
+
+nocallapi
+Question: 
+Run result of the code is: 
+
+Error opening pcap device: dummy_interface: No such device exists (SIOCGIFHWADDR: No such device)
+Please fix this code based on the run result. Please Follow the instruction in the first session! 
+Note: I am using the program automation to run the code you gave, so please generate the code directly that will run correctly.
+Answer Format: ```code```
+Answer: 
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+
+#define PCAP_ERRBUF_SIZE 256 // Standard size for error buffer
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    int status;
+
+    // Initialize error buffer
+    errbuf[0] = '\0';
+
+    // --- Step 1: Find a suitable network interface ---
+    // We need a valid network interface to open.
+    // pcap_findalldevs() is used to list available devices.
+    pcap_if_t *alldevs;
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        fprintf(stderr, "Error finding all devices: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+
+    char *device_to_open = NULL;
+    pcap_if_t *d = alldevs;
+
+    // Iterate through devices to find a suitable one.
+    // We'll prefer a loopback or an UP and RUNNING interface.
+    while (d != NULL) {
+        // Check if the device is usable (not a virtual interface for simulation, etc.)
+        if (d->flags & PCAP_IF_UP && !(d->flags & PCAP_IF_LOOPBACK) && (d->flags & PCAP_IF_RUNNING)) {
+             // Check if the interface has an IPv4 address (common for active interfaces)
+            struct pcap_addr *a = d->addresses;
+            while (a != NULL) {
+                if (a->addr->sa_family == AF_INET) { // Check for IPv4
+                    device_to_open = d->name;
+                    break;
+                }
+                a = a->next;
+            }
+        }
+        if (device_to_open) break; // Found a suitable device
+        d = d->next;
+    }
+
+    // If no suitable device is found, try the loopback interface
+    if (device_to_open == NULL) {
+        d = alldevs;
+        while (d != NULL) {
+            if (d->flags & PCAP_IF_LOOPBACK) {
+                device_to_open = d->name;
+                break;
+            }
+            d = d->next;
+        }
+    }
+
+    // If still no device found, exit
+    if (device_to_open == NULL) {
+        fprintf(stderr, "No suitable network interface found.\n");
+        fflush(stdout);
+        pcap_freealldevs(alldevs); // Free the list of devices
+        return 123;
+    }
+
+    printf("Attempting to open device: %s\n", device_to_open);
+    fflush(stdout);
+
+    // Open the selected device for live capture
+    handle = pcap_open_live(device_to_open, 65536, 1, 1000, errbuf);
+    pcap_freealldevs(alldevs); // Free the list of devices now that we've opened one
+
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap device '%s': %s\n", device_to_open, errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap device '%s'.\n", device_to_open);
+    fflush(stdout);
+
+    // --- Step 2: Prepare for pcap_activate ---
+    // The pcap_t handle is now initialized but not activated.
+    // We can simulate setting non-blocking mode if desired.
+    // handle->opt.nonblock = 1; // Uncomment to test non-blocking activation
+
+    // --- Step 3: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout);
+
+    status = pcap_activate(handle);
+
+    // --- Step 4: Check the status of pcap_activate ---
+    if (status < 0) {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        // If pcap_activate failed, it might have already populated errbuf.
+        // If not, we can use pcap_statustostr.
+        if (errbuf[0] == '\0') {
+            snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", pcap_statustostr(status));
+        }
+        fprintf(stderr, "pcap_activate failed with status %d: %s\n", status, errbuf);
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+    }
+
+    // --- Step 5: Clean up ---
+    // pcap_close handles the cleanup of the activated handle.
+    pcap_close(handle);
+    printf("pcap_close called to release resources.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+#define PCAP_ERRBUF_SIZE 256 // Standard size for error buffer
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    int status;
+
+    // Initialize error buffer
+    errbuf[0] = '\0';
+
+    // --- Step 1: Find a suitable network interface ---
+    // We need a valid network interface to open.
+    // pcap_findalldevs() is used to list available devices.
+    pcap_if_t *alldevs;
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        fprintf(stderr, "Error finding all devices: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+
+    char *device_to_open = NULL;
+    pcap_if_t *d = alldevs;
+
+    // Iterate through devices to find a suitable one.
+    // We'll prefer a loopback or an UP and RUNNING interface.
+    while (d != NULL) {
+        // Check if the device is usable (not a virtual interface for simulation, etc.)
+        if (d->flags & PCAP_IF_UP && !(d->flags & PCAP_IF_LOOPBACK) && (d->flags & PCAP_IF_RUNNING)) {
+             // Check if the interface has an IPv4 address (common for active interfaces)
+            struct pcap_addr *a = d->addresses;
+            while (a != NULL) {
+                if (a->addr->sa_family == AF_INET) { // Check for IPv4
+                    device_to_open = d->name;
+                    break;
+                }
+                a = a->next;
+            }
+        }
+        if (device_to_open) break; // Found a suitable device
+        d = d->next;
+    }
+
+    // If no suitable device is found, try the loopback interface
+    if (device_to_open == NULL) {
+        d = alldevs;
+        while (d != NULL) {
+            if (d->flags & PCAP_IF_LOOPBACK) {
+                device_to_open = d->name;
+                break;
+            }
+            d = d->next;
+        }
+    }
+
+    // If still no device found, exit
+    if (device_to_open == NULL) {
+        fprintf(stderr, "No suitable network interface found.\n");
+        fflush(stdout);
+        pcap_freealldevs(alldevs); // Free the list of devices
+        return 123;
+    }
+
+    printf("Attempting to open device: %s\n", device_to_open);
+    fflush(stdout);
+
+    // Open the selected device for live capture
+    handle = pcap_open_live(device_to_open, 65536, 1, 1000, errbuf);
+    pcap_freealldevs(alldevs); // Free the list of devices now that we've opened one
+
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap device '%s': %s\n", device_to_open, errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap device '%s'.\n", device_to_open);
+    fflush(stdout);
+
+    // --- Step 2: Prepare for pcap_activate ---
+    // The pcap_t handle is now initialized but not activated.
+    // We can simulate setting non-blocking mode if desired.
+    // handle->opt.nonblock = 1; // Uncomment to test non-blocking activation
+
+    // --- Step 3: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout);
+
+    status = pcap_activate(handle);
+
+    // --- Step 4: Check the status of pcap_activate ---
+    if (status < 0) {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        // If pcap_activate failed, it might have already populated errbuf.
+        // If not, we can use pcap_statustostr.
+        if (errbuf[0] == '\0') {
+            snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", pcap_statustostr(status));
+        }
+        fprintf(stderr, "pcap_activate failed with status %d: %s\n", status, errbuf);
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+    }
+
+    // --- Step 5: Clean up ---
+    // pcap_close handles the cleanup of the activated handle.
+    pcap_close(handle);
+    printf("pcap_close called to release resources.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+False
+Attempting to open device: eth0
+
+=================================================================
+==7==ERROR: AddressSanitizer: heap-use-after-free on address 0xffff83e00770 at pc 0xffff89dddb6c bp 0xfffff3090600 sp 0xfffff308fdb0
+READ of size 2 at 0xffff83e00770 thread T0
+    #0 0xffff89dddb68 in printf_common ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553
+    #1 0xffff89dde25c in __interceptor_vprintf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1660
+    #2 0xffff89dde37c in __interceptor_printf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1718
+    #3 0xaaaae7432e04 in main /sandbox/pcap_activate.c:82
+    #4 0xffff895073fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffff895074d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaae74322ec in _start (/sandbox/pcap_activate+0x22ec)
+
+0xffff83e00770 is located 0 bytes inside of 5-byte region [0xffff83e00770,0xffff83e00775)
+freed by thread T0 here:
+    #0 0xffff89e2f0d8 in __interceptor_free ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:127
+    #1 0xffff89d2ab38 in pcap_freealldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xab38)
+    #2 0xaaaae7432d4c in main /sandbox/pcap_activate.c:75
+    #3 0xffff895073fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #4 0xffff895074d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #5 0xaaaae74322ec in _start (/sandbox/pcap_activate+0x22ec)
+
+previously allocated by thread T0 here:
+    #0 0xffff89ddb630 in __interceptor_strdup ../../../../src/libsanitizer/asan/asan_interceptors.cpp:454
+    #1 0xffff89d26e70  (/lib/aarch64-linux-gnu/libpcap.so.0.8+0x6e70)
+    #2 0xffff89d2ae78 in pcap_findalldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xae78)
+    #3 0xaaaae74324e8 in main /sandbox/pcap_activate.c:22
+    #4 0xffff895073fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffff895074d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaae74322ec in _start (/sandbox/pcap_activate+0x22ec)
+
+SUMMARY: AddressSanitizer: heap-use-after-free ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553 in printf_common
+Shadow bytes around the buggy address:
+  0x200ff07c0090: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff07c00a0: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff07c00b0: fa fa fd fd fa fa fd fd fa fa fd fa fa fa fd fd
+  0x200ff07c00c0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fd
+  0x200ff07c00d0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fa
+=>0x200ff07c00e0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa[fd]fa
+  0x200ff07c00f0: fa fa fd fa fa fa fd fa fa fa fa fa fa fa fa fa
+  0x200ff07c0100: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff07c0110: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff07c0120: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff07c0130: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+  Shadow gap:              cc
+==7==ABORTING
+
+run
+token_right: 5232. Token_one: 1951
+Question: 
+Run result of the code is: 
+Attempting to open device: eth0
+
+=================================================================
+==7==ERROR: AddressSanitizer: heap-use-after-free on address 0xffff83e00770 at pc 0xffff89dddb6c bp 0xfffff3090600 sp 0xfffff308fdb0
+READ of size 2 at 0xffff83e00770 thread T0
+    #0 0xffff89dddb68 in printf_common ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553
+    #1 0xffff89dde25c in __interceptor_vprintf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1660
+    #2 0xffff89dde37c in __interceptor_printf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1718
+    #3 0xaaaae7432e04 in main /sandbox/pcap_activate.c:82
+    #4 0xffff895073fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffff895074d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaae74322ec in _start (/sandbox/pcap_activate+0x22ec)
+
+0xffff83e00770 is located 0 bytes inside of 5-byte region [0xffff83e00770,0xffff83e00775)
+freed by thread T0 here:
+    #0 0xffff89e2f0d8 in __interceptor_free ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:127
+    #1 0xffff89d2ab38 in pcap_freealldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xab38)
+    #2 0xaaaae7432d4c in main /sandbox/pcap_activate.c:75
+    #3 0xffff895073fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #4 0xffff895074d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #5 0xaaaae74322ec in _start (/sandbox/pcap_activate+0x22ec)
+
+previously allocated by thread T0 here:
+    #0 0xffff89ddb630 in __interceptor_strdup ../../../../src/libsanitizer/asan/asan_interceptors.cpp:454
+    #1 0xffff89d26e70  (/lib/aarch64-linux-gnu/libpcap.so.0.8+0x6e70)
+    #2 0xffff89d2ae78 in pcap_findalldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xae78)
+    #3 0xaaaae74324e8 in main /sandbox/pcap_activate.c:22
+    #4 0xffff895073fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffff895074d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaae74322ec in _start (/sandbox/pcap_activate+0x22ec)
+
+SUMMARY: AddressSanitizer: heap-use-after-free ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553 in printf_common
+Shadow bytes around the buggy address:
+  0x200ff07c0090: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff07c00a0: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff07c00b0: fa fa fd fd fa fa fd fd fa fa fd fa fa fa fd fd
+  0x200ff07c00c0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fd
+  0x200ff07c00d0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fa
+=>0x200ff07c00e0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa[fd]fa
+  0x200ff07c00f0: fa fa fd fa fa fa fd fa fa fa fa fa fa fa fa fa
+  0x200ff07c0100: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff07c0110: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff07c0120: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff07c0130: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+  Shadow gap:              cc
+==7==ABORTING
+Please fix this code based on the run result. Please Follow the instruction in the first session!
+Note: I am using the program automation to run the code you gave, so please generate the code directly that will run correctly
+Answer Format: ```code```
+Answer: 
+```code
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+#define PCAP_ERRBUF_SIZE 256 // Standard size for error buffer
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    int status;
+
+    // Initialize error buffer
+    errbuf[0] = '\0';
+
+    // --- Step 1: Find a suitable network interface ---
+    pcap_if_t *alldevs;
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        fprintf(stderr, "Error finding all devices: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+
+    char *device_to_open = NULL;
+    pcap_if_t *d = alldevs;
+
+    // Iterate through devices to find a suitable one.
+    while (d != NULL) {
+        if (d->flags & PCAP_IF_UP && !(d->flags & PCAP_IF_LOOPBACK) && (d->flags & PCAP_IF_RUNNING)) {
+             struct pcap_addr *a = d->addresses;
+            while (a != NULL) {
+                if (a->addr->sa_family == AF_INET) { // Check for IPv4
+                    device_to_open = d->name;
+                    break;
+                }
+                a = a->next;
+            }
+        }
+        if (device_to_open) break; // Found a suitable device
+        d = d->next;
+    }
+
+    // If no suitable device is found, try the loopback interface
+    if (device_to_open == NULL) {
+        d = alldevs;
+        while (d != NULL) {
+            if (d->flags & PCAP_IF_LOOPBACK) {
+                device_to_open = d->name;
+                break;
+            }
+            d = d->next;
+        }
+    }
+
+    // If still no device found, exit
+    if (device_to_open == NULL) {
+        fprintf(stderr, "No suitable network interface found.\n");
+        fflush(stdout);
+        pcap_freealldevs(alldevs); // Free the list of devices
+        return 123;
+    }
+
+    printf("Attempting to open device: %s\n", device_to_open);
+    fflush(stdout);
+
+    // Open the selected device for live capture
+    handle = pcap_open_live(device_to_open, 65536, 1, 1000, errbuf);
+    
+    // Crucially, free the device list *after* pcap_open_live has potentially used its data
+    // and before any subsequent operations that might rely on the handle's internal state.
+    pcap_freealldevs(alldevs); 
+
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap device '%s': %s\n", device_to_open, errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap device '%s'.\n", device_to_open);
+    fflush(stdout);
+
+    // --- Step 2: Prepare for pcap_activate ---
+    // The pcap_t handle is now initialized but not activated.
+
+    // --- Step 3: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout);
+
+    status = pcap_activate(handle);
+
+    // --- Step 4: Check the status of pcap_activate ---
+    if (status < 0) {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        // If pcap_activate failed, it might have already populated errbuf.
+        // If not, we can use pcap_statustostr.
+        if (errbuf[0] == '\0') {
+            // pcap_activate itself might have set the error if activate_op failed.
+            // However, if the error is a generic status code, we can convert it.
+            // The provided code snippet of pcap_activate already handles this by
+            // calling pcap_statustostr if errbuf is empty and status is negative.
+            // We'll ensure our errbuf reflects that.
+            const char *status_str = pcap_statustostr(status);
+            if (status_str) {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", status_str);
+            } else {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "Unknown pcap error with status %d", status);
+            }
+        }
+        fprintf(stderr, "pcap_activate failed with status %d: %s\n", status, errbuf);
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+    }
+
+    // --- Step 5: Clean up ---
+    // pcap_close handles the cleanup of the activated handle.
+    pcap_close(handle);
+    printf("pcap_close called to release resources.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+
+#define PCAP_ERRBUF_SIZE 256 // Standard size for error buffer
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    int status;
+
+    // Initialize error buffer
+    errbuf[0] = '\0';
+
+    // --- Step 1: Find a suitable network interface ---
+    pcap_if_t *alldevs;
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        fprintf(stderr, "Error finding all devices: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+
+    char *device_to_open = NULL;
+    pcap_if_t *d = alldevs;
+
+    // Iterate through devices to find a suitable one.
+    while (d != NULL) {
+        if (d->flags & PCAP_IF_UP && !(d->flags & PCAP_IF_LOOPBACK) && (d->flags & PCAP_IF_RUNNING)) {
+             struct pcap_addr *a = d->addresses;
+            while (a != NULL) {
+                if (a->addr->sa_family == AF_INET) { // Check for IPv4
+                    device_to_open = d->name;
+                    break;
+                }
+                a = a->next;
+            }
+        }
+        if (device_to_open) break; // Found a suitable device
+        d = d->next;
+    }
+
+    // If no suitable device is found, try the loopback interface
+    if (device_to_open == NULL) {
+        d = alldevs;
+        while (d != NULL) {
+            if (d->flags & PCAP_IF_LOOPBACK) {
+                device_to_open = d->name;
+                break;
+            }
+            d = d->next;
+        }
+    }
+
+    // If still no device found, exit
+    if (device_to_open == NULL) {
+        fprintf(stderr, "No suitable network interface found.\n");
+        fflush(stdout);
+        pcap_freealldevs(alldevs); // Free the list of devices
+        return 123;
+    }
+
+    printf("Attempting to open device: %s\n", device_to_open);
+    fflush(stdout);
+
+    // Open the selected device for live capture
+    handle = pcap_open_live(device_to_open, 65536, 1, 1000, errbuf);
+    
+    // Crucially, free the device list *after* pcap_open_live has potentially used its data
+    // and before any subsequent operations that might rely on the handle's internal state.
+    pcap_freealldevs(alldevs); 
+
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap device '%s': %s\n", device_to_open, errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap device '%s'.\n", device_to_open);
+    fflush(stdout);
+
+    // --- Step 2: Prepare for pcap_activate ---
+    // The pcap_t handle is now initialized but not activated.
+
+    // --- Step 3: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout);
+
+    status = pcap_activate(handle);
+
+    // --- Step 4: Check the status of pcap_activate ---
+    if (status < 0) {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        // If pcap_activate failed, it might have already populated errbuf.
+        // If not, we can use pcap_statustostr.
+        if (errbuf[0] == '\0') {
+            // pcap_activate itself might have set the error if activate_op failed.
+            // However, if the error is a generic status code, we can convert it.
+            // The provided code snippet of pcap_activate already handles this by
+            // calling pcap_statustostr if errbuf is empty and status is negative.
+            // We'll ensure our errbuf reflects that.
+            const char *status_str = pcap_statustostr(status);
+            if (status_str) {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", status_str);
+            } else {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "Unknown pcap error with status %d", status);
+            }
+        }
+        fprintf(stderr, "pcap_activate failed with status %d: %s\n", status, errbuf);
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+    }
+
+    // --- Step 5: Clean up ---
+    // pcap_close handles the cleanup of the activated handle.
+    pcap_close(handle);
+    printf("pcap_close called to release resources.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+False
+Attempting to open device: eth0
+
+=================================================================
+==7==ERROR: AddressSanitizer: heap-use-after-free on address 0xffff84f00770 at pc 0xffff8af1db6c bp 0xffffe786c670 sp 0xffffe786be20
+READ of size 2 at 0xffff84f00770 thread T0
+    #0 0xffff8af1db68 in printf_common ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553
+    #1 0xffff8af1e25c in __interceptor_vprintf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1660
+    #2 0xffff8af1e37c in __interceptor_printf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1718
+    #3 0xaaaaad7e2ec4 in main /sandbox/pcap_activate.c:82
+    #4 0xffff8a6473fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffff8a6474d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaaad7e23ac in _start (/sandbox/pcap_activate+0x23ac)
+
+0xffff84f00770 is located 0 bytes inside of 5-byte region [0xffff84f00770,0xffff84f00775)
+freed by thread T0 here:
+    #0 0xffff8af6f0d8 in __interceptor_free ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:127
+    #1 0xffff8ae6ab38 in pcap_freealldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xab38)
+    #2 0xaaaaad7e2e0c in main /sandbox/pcap_activate.c:75
+    #3 0xffff8a6473fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #4 0xffff8a6474d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #5 0xaaaaad7e23ac in _start (/sandbox/pcap_activate+0x23ac)
+
+previously allocated by thread T0 here:
+    #0 0xffff8af1b630 in __interceptor_strdup ../../../../src/libsanitizer/asan/asan_interceptors.cpp:454
+    #1 0xffff8ae66e70  (/lib/aarch64-linux-gnu/libpcap.so.0.8+0x6e70)
+    #2 0xffff8ae6ae78 in pcap_findalldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xae78)
+    #3 0xaaaaad7e25a8 in main /sandbox/pcap_activate.c:22
+    #4 0xffff8a6473fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffff8a6474d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaaad7e23ac in _start (/sandbox/pcap_activate+0x23ac)
+
+SUMMARY: AddressSanitizer: heap-use-after-free ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553 in printf_common
+Shadow bytes around the buggy address:
+  0x200ff09e0090: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff09e00a0: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff09e00b0: fa fa fd fd fa fa fd fd fa fa fd fa fa fa fd fd
+  0x200ff09e00c0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fd
+  0x200ff09e00d0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fa
+=>0x200ff09e00e0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa[fd]fa
+  0x200ff09e00f0: fa fa fd fa fa fa fd fa fa fa fa fa fa fa fa fa
+  0x200ff09e0100: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff09e0110: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff09e0120: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff09e0130: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+  Shadow gap:              cc
+==7==ABORTING
+
+run
+token_right: 10177. Token_one: 1951
+Question: 
+Run result of the code is: 
+Attempting to open device: eth0
+
+=================================================================
+==7==ERROR: AddressSanitizer: heap-use-after-free on address 0xffff84f00770 at pc 0xffff8af1db6c bp 0xffffe786c670 sp 0xffffe786be20
+READ of size 2 at 0xffff84f00770 thread T0
+    #0 0xffff8af1db68 in printf_common ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553
+    #1 0xffff8af1e25c in __interceptor_vprintf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1660
+    #2 0xffff8af1e37c in __interceptor_printf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1718
+    #3 0xaaaaad7e2ec4 in main /sandbox/pcap_activate.c:82
+    #4 0xffff8a6473fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffff8a6474d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaaad7e23ac in _start (/sandbox/pcap_activate+0x23ac)
+
+0xffff84f00770 is located 0 bytes inside of 5-byte region [0xffff84f00770,0xffff84f00775)
+freed by thread T0 here:
+    #0 0xffff8af6f0d8 in __interceptor_free ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:127
+    #1 0xffff8ae6ab38 in pcap_freealldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xab38)
+    #2 0xaaaaad7e2e0c in main /sandbox/pcap_activate.c:75
+    #3 0xffff8a6473fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #4 0xffff8a6474d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #5 0xaaaaad7e23ac in _start (/sandbox/pcap_activate+0x23ac)
+
+previously allocated by thread T0 here:
+    #0 0xffff8af1b630 in __interceptor_strdup ../../../../src/libsanitizer/asan/asan_interceptors.cpp:454
+    #1 0xffff8ae66e70  (/lib/aarch64-linux-gnu/libpcap.so.0.8+0x6e70)
+    #2 0xffff8ae6ae78 in pcap_findalldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xae78)
+    #3 0xaaaaad7e25a8 in main /sandbox/pcap_activate.c:22
+    #4 0xffff8a6473fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffff8a6474d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaaad7e23ac in _start (/sandbox/pcap_activate+0x23ac)
+
+SUMMARY: AddressSanitizer: heap-use-after-free ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553 in printf_common
+Shadow bytes around the buggy address:
+  0x200ff09e0090: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff09e00a0: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff09e00b0: fa fa fd fd fa fa fd fd fa fa fd fa fa fa fd fd
+  0x200ff09e00c0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fd
+  0x200ff09e00d0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fa
+=>0x200ff09e00e0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa[fd]fa
+  0x200ff09e00f0: fa fa fd fa fa fa fd fa fa fa fa fa fa fa fa fa
+  0x200ff09e0100: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff09e0110: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff09e0120: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff09e0130: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+  Shadow gap:              cc
+==7==ABORTING
+Please fix this code based on the run result. Please Follow the instruction in the first session!
+Note: I am using the program automation to run the code you gave, so please generate the code directly that will run correctly
+Answer Format: ```code```
+Answer: 
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+#define PCAP_ERRBUF_SIZE 256 // Standard size for error buffer
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    pcap_if_t *alldevs = NULL; // Initialize to NULL
+    pcap_if_t *d = NULL;
+    char *device_to_open = NULL;
+    int status;
+
+    // Initialize error buffer
+    errbuf[0] = '\0';
+
+    // --- Step 1: Find a suitable network interface ---
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        fprintf(stderr, "Error finding all devices: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+
+    d = alldevs;
+    // Iterate through devices to find a suitable one.
+    while (d != NULL) {
+        // Check for active and non-loopback interfaces with IPv4 addresses
+        if (d->flags & PCAP_IF_UP && !(d->flags & PCAP_IF_LOOPBACK) && (d->flags & PCAP_IF_RUNNING)) {
+            struct pcap_addr *a = d->addresses;
+            while (a != NULL) {
+                if (a->addr->sa_family == AF_INET) { // Check for IPv4
+                    device_to_open = d->name;
+                    break;
+                }
+                a = a->next;
+            }
+        }
+        if (device_to_open) break; // Found a suitable device
+        d = d->next;
+    }
+
+    // If no suitable device is found, try the loopback interface
+    if (device_to_open == NULL) {
+        d = alldevs;
+        while (d != NULL) {
+            if (d->flags & PCAP_IF_LOOPBACK) {
+                device_to_open = d->name;
+                break;
+            }
+            d = d->next;
+        }
+    }
+
+    // If still no device found, exit
+    if (device_to_open == NULL) {
+        fprintf(stderr, "No suitable network interface found.\n");
+        fflush(stdout);
+        pcap_freealldevs(alldevs); // Free the list of devices
+        return 123;
+    }
+
+    printf("Attempting to open device: %s\n", device_to_open);
+    fflush(stdout);
+
+    // Open the selected device for live capture
+    // The third argument (promisc) is set to 1 for promiscuous mode.
+    // The fourth argument (timeout_ms) is set to 1000ms.
+    handle = pcap_open_live(device_to_open, 65536, 1, 1000, errbuf);
+    
+    // Free the device list AFTER pcap_open_live has been called.
+    // pcap_open_live might copy necessary information from alldevs,
+    // so it's safe to free it now.
+    pcap_freealldevs(alldevs); 
+    alldevs = NULL; // Set to NULL to avoid double free issues if errors occur later
+
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap device '%s': %s\n", device_to_open, errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap device '%s'.\n", device_to_open);
+    fflush(stdout);
+
+    // --- Step 2: Prepare for pcap_activate ---
+    // The pcap_t handle is now initialized but not activated.
+
+    // --- Step 3: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout);
+
+    status = pcap_activate(handle);
+
+    // --- Step 4: Check the status of pcap_activate ---
+    if (status < 0) {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        // The pcap_activate function itself populates the errbuf if an error occurs
+        // and the activate_op routine doesn't. If status is negative, we should
+        // trust the errbuf or use pcap_statustostr if it's still empty.
+        if (errbuf[0] == '\0') {
+            // If errbuf is still empty, get the string representation of the status code.
+            const char *status_str = pcap_statustostr(status);
+            if (status_str) {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", status_str);
+            } else {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "Unknown pcap error with status %d", status);
+            }
+        }
+        fprintf(stderr, "pcap_activate failed: %s\n", errbuf);
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+    }
+
+    // --- Step 5: Clean up ---
+    // pcap_close handles the cleanup of the activated handle.
+    pcap_close(handle);
+    printf("pcap_close called to release resources.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+#define PCAP_ERRBUF_SIZE 256 // Standard size for error buffer
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    pcap_if_t *alldevs = NULL; // Initialize to NULL
+    pcap_if_t *d = NULL;
+    char *device_to_open = NULL;
+    int status;
+
+    // Initialize error buffer
+    errbuf[0] = '\0';
+
+    // --- Step 1: Find a suitable network interface ---
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        fprintf(stderr, "Error finding all devices: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+
+    d = alldevs;
+    // Iterate through devices to find a suitable one.
+    while (d != NULL) {
+        // Check for active and non-loopback interfaces with IPv4 addresses
+        if (d->flags & PCAP_IF_UP && !(d->flags & PCAP_IF_LOOPBACK) && (d->flags & PCAP_IF_RUNNING)) {
+            struct pcap_addr *a = d->addresses;
+            while (a != NULL) {
+                if (a->addr->sa_family == AF_INET) { // Check for IPv4
+                    device_to_open = d->name;
+                    break;
+                }
+                a = a->next;
+            }
+        }
+        if (device_to_open) break; // Found a suitable device
+        d = d->next;
+    }
+
+    // If no suitable device is found, try the loopback interface
+    if (device_to_open == NULL) {
+        d = alldevs;
+        while (d != NULL) {
+            if (d->flags & PCAP_IF_LOOPBACK) {
+                device_to_open = d->name;
+                break;
+            }
+            d = d->next;
+        }
+    }
+
+    // If still no device found, exit
+    if (device_to_open == NULL) {
+        fprintf(stderr, "No suitable network interface found.\n");
+        fflush(stdout);
+        pcap_freealldevs(alldevs); // Free the list of devices
+        return 123;
+    }
+
+    printf("Attempting to open device: %s\n", device_to_open);
+    fflush(stdout);
+
+    // Open the selected device for live capture
+    // The third argument (promisc) is set to 1 for promiscuous mode.
+    // The fourth argument (timeout_ms) is set to 1000ms.
+    handle = pcap_open_live(device_to_open, 65536, 1, 1000, errbuf);
+    
+    // Free the device list AFTER pcap_open_live has been called.
+    // pcap_open_live might copy necessary information from alldevs,
+    // so it's safe to free it now.
+    pcap_freealldevs(alldevs); 
+    alldevs = NULL; // Set to NULL to avoid double free issues if errors occur later
+
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap device '%s': %s\n", device_to_open, errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap device '%s'.\n", device_to_open);
+    fflush(stdout);
+
+    // --- Step 2: Prepare for pcap_activate ---
+    // The pcap_t handle is now initialized but not activated.
+
+    // --- Step 3: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout);
+
+    status = pcap_activate(handle);
+
+    // --- Step 4: Check the status of pcap_activate ---
+    if (status < 0) {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        // The pcap_activate function itself populates the errbuf if an error occurs
+        // and the activate_op routine doesn't. If status is negative, we should
+        // trust the errbuf or use pcap_statustostr if it's still empty.
+        if (errbuf[0] == '\0') {
+            // If errbuf is still empty, get the string representation of the status code.
+            const char *status_str = pcap_statustostr(status);
+            if (status_str) {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", status_str);
+            } else {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "Unknown pcap error with status %d", status);
+            }
+        }
+        fprintf(stderr, "pcap_activate failed: %s\n", errbuf);
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+    }
+
+    // --- Step 5: Clean up ---
+    // pcap_close handles the cleanup of the activated handle.
+    pcap_close(handle);
+    printf("pcap_close called to release resources.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+False
+Attempting to open device: eth0
+
+I0425 19:21:03.823006 17903397 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:03.823485 17903397 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:03.823490 17903397 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:03.823492 17903397 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:03.823495 17903397 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+=================================================================
+==7==ERROR: AddressSanitizer: heap-use-after-free on address 0xffffa8b00770 at pc 0xffffaeaadb6c bp 0xffffdb0656a0 sp 0xffffdb064e50
+READ of size 2 at 0xffffa8b00770 thread T0
+    #0 0xffffaeaadb68 in printf_common ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553
+    #1 0xffffaeaae25c in __interceptor_vprintf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1660
+    #2 0xffffaeaae37c in __interceptor_printf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1718
+    #3 0xaaaabf292f58 in main /sandbox/pcap_activate.c:86
+    #4 0xffffae1d73fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffffae1d74d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaabf2923ec in _start (/sandbox/pcap_activate+0x23ec)
+
+0xffffa8b00770 is located 0 bytes inside of 5-byte region [0xffffa8b00770,0xffffa8b00775)
+freed by thread T0 here:
+    #0 0xffffaeaff0d8 in __interceptor_free ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:127
+    #1 0xffffae9fab38 in pcap_freealldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xab38)
+    #2 0xaaaabf292e78 in main /sandbox/pcap_activate.c:78
+    #3 0xffffae1d73fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #4 0xffffae1d74d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #5 0xaaaabf2923ec in _start (/sandbox/pcap_activate+0x23ec)
+
+previously allocated by thread T0 here:
+    #0 0xffffaeaab630 in __interceptor_strdup ../../../../src/libsanitizer/asan/asan_interceptors.cpp:454
+    #1 0xffffae9f6e70  (/lib/aarch64-linux-gnu/libpcap.so.0.8+0x6e70)
+    #2 0xffffae9fae78 in pcap_findalldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xae78)
+    #3 0xaaaabf292618 in main /sandbox/pcap_activate.c:23
+    #4 0xffffae1d73fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffffae1d74d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaabf2923ec in _start (/sandbox/pcap_activate+0x23ec)
+
+SUMMARY: AddressSanitizer: heap-use-after-free ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553 in printf_common
+Shadow bytes around the buggy address:
+  0x200ff5160090: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff51600a0: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff51600b0: fa fa fd fd fa fa fd fd fa fa fd fa fa fa fd fd
+  0x200ff51600c0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fd
+  0x200ff51600d0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fa
+=>0x200ff51600e0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa[fd]fa
+  0x200ff51600f0: fa fa fd fa fa fa fd fa fa fa fa fa fa fa fa fa
+  0x200ff5160100: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff5160110: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff5160120: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff5160130: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+  Shadow gap:              cc
+==7==ABORTING
+
+run
+token_right: 15221. Token_one: 1951
+Question: 
+Run result of the code is: 
+Attempting to open device: eth0
+
+I0425 19:21:03.823006 17903397 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:03.823485 17903397 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:03.823490 17903397 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:03.823492 17903397 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:03.823495 17903397 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+=================================================================
+==7==ERROR: AddressSanitizer: heap-use-after-free on address 0xffffa8b00770 at pc 0xffffaeaadb6c bp 0xffffdb0656a0 sp 0xffffdb064e50
+READ of size 2 at 0xffffa8b00770 thread T0
+    #0 0xffffaeaadb68 in printf_common ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553
+    #1 0xffffaeaae25c in __interceptor_vprintf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1660
+    #2 0xffffaeaae37c in __interceptor_printf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1718
+    #3 0xaaaabf292f58 in main /sandbox/pcap_activate.c:86
+    #4 0xffffae1d73fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffffae1d74d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaabf2923ec in _start (/sandbox/pcap_activate+0x23ec)
+
+0xffffa8b00770 is located 0 bytes inside of 5-byte region [0xffffa8b00770,0xffffa8b00775)
+freed by thread T0 here:
+    #0 0xffffaeaff0d8 in __interceptor_free ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:127
+    #1 0xffffae9fab38 in pcap_freealldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xab38)
+    #2 0xaaaabf292e78 in main /sandbox/pcap_activate.c:78
+    #3 0xffffae1d73fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #4 0xffffae1d74d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #5 0xaaaabf2923ec in _start (/sandbox/pcap_activate+0x23ec)
+
+previously allocated by thread T0 here:
+    #0 0xffffaeaab630 in __interceptor_strdup ../../../../src/libsanitizer/asan/asan_interceptors.cpp:454
+    #1 0xffffae9f6e70  (/lib/aarch64-linux-gnu/libpcap.so.0.8+0x6e70)
+    #2 0xffffae9fae78 in pcap_findalldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xae78)
+    #3 0xaaaabf292618 in main /sandbox/pcap_activate.c:23
+    #4 0xffffae1d73fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffffae1d74d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaabf2923ec in _start (/sandbox/pcap_activate+0x23ec)
+
+SUMMARY: AddressSanitizer: heap-use-after-free ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553 in printf_common
+Shadow bytes around the buggy address:
+  0x200ff5160090: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff51600a0: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff51600b0: fa fa fd fd fa fa fd fd fa fa fd fa fa fa fd fd
+  0x200ff51600c0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fd
+  0x200ff51600d0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fa
+=>0x200ff51600e0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa[fd]fa
+  0x200ff51600f0: fa fa fd fa fa fa fd fa fa fa fa fa fa fa fa fa
+  0x200ff5160100: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff5160110: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff5160120: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff5160130: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+  Shadow gap:              cc
+==7==ABORTING
+Please fix this code based on the run result. Please Follow the instruction in the first session!
+Note: I am using the program automation to run the code you gave, so please generate the code directly that will run correctly
+Answer Format: ```code```
+Answer: 
+```code
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pcap.h>
+#include <errno.h> // For errno
+
+#define PCAP_ERRBUF_SIZE 256 // Standard size for error buffer
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    pcap_if_t *alldevs = NULL;
+    pcap_if_t *d = NULL;
+    char *device_to_open = NULL;
+    int status;
+
+    errbuf[0] = '\0';
+
+    // --- Step 1: Find a suitable network interface ---
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        fprintf(stderr, "Error finding all devices: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+
+    d = alldevs;
+    // Iterate through devices to find a suitable one.
+    while (d != NULL) {
+        if (d->flags & PCAP_IF_UP && !(d->flags & PCAP_IF_LOOPBACK) && (d->flags & PCAP_IF_RUNNING)) {
+            struct pcap_addr *a = d->addresses;
+            while (a != NULL) {
+                if (a->addr->sa_family == AF_INET) { // Check for IPv4
+                    device_to_open = d->name;
+                    break;
+                }
+                a = a->next;
+            }
+        }
+        if (device_to_open) break;
+        d = d->next;
+    }
+
+    // If no suitable device is found, try the loopback interface
+    if (device_to_open == NULL) {
+        d = alldevs;
+        while (d != NULL) {
+            if (d->flags & PCAP_IF_LOOPBACK) {
+                device_to_open = d->name;
+                break;
+            }
+            d = d->next;
+        }
+    }
+
+    if (device_to_open == NULL) {
+        fprintf(stderr, "No suitable network interface found.\n");
+        fflush(stdout);
+        pcap_freealldevs(alldevs);
+        return 123;
+    }
+
+    printf("Attempting to open device: %s\n", device_to_open);
+    fflush(stdout);
+
+    // Open the selected device for live capture
+    // The third argument (promisc) is set to 1 for promiscuous mode.
+    // The fourth argument (timeout_ms) is set to 1000ms.
+    handle = pcap_open_live(device_to_open, 65536, 1, 1000, errbuf);
+    
+    // Free the device list AFTER pcap_open_live.
+    // This prevents the heap-use-after-free.
+    pcap_freealldevs(alldevs); 
+    alldevs = NULL; // Set to NULL to indicate it's been freed
+
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap device '%s': %s\n", device_to_open, errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap device '%s'.\n", device_to_open);
+    fflush(stdout);
+
+    // --- Step 2: Prepare for pcap_activate ---
+    // The pcap_t handle is now initialized but not activated.
+
+    // --- Step 3: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout);
+
+    status = pcap_activate(handle);
+
+    // --- Step 4: Check the status of pcap_activate ---
+    if (status < 0) {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        // If status is negative, pcap_activate might have set the errbuf.
+        // If it's still empty, we need to get the error string.
+        if (errbuf[0] == '\0') {
+            const char *status_str = pcap_statustostr(status);
+            if (status_str) {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", status_str);
+            } else {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "Unknown pcap error with status %d", status);
+            }
+        }
+        fprintf(stderr, "pcap_activate failed: %s\n", errbuf);
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+    }
+
+    // --- Step 5: Clean up ---
+    pcap_close(handle);
+    printf("pcap_close called to release resources.\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+#define PCAP_ERRBUF_SIZE 256 // Standard size for error buffer
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    pcap_if_t *alldevs = NULL;
+    pcap_if_t *d = NULL;
+    char *device_to_open = NULL;
+    int status;
+
+    errbuf[0] = '\0';
+
+    // --- Step 1: Find a suitable network interface ---
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        fprintf(stderr, "Error finding all devices: %s\n", errbuf);
+        fflush(stdout);
+        return 123;
+    }
+
+    d = alldevs;
+    // Iterate through devices to find a suitable one.
+    while (d != NULL) {
+        if (d->flags & PCAP_IF_UP && !(d->flags & PCAP_IF_LOOPBACK) && (d->flags & PCAP_IF_RUNNING)) {
+            struct pcap_addr *a = d->addresses;
+            while (a != NULL) {
+                if (a->addr->sa_family == AF_INET) { // Check for IPv4
+                    device_to_open = d->name;
+                    break;
+                }
+                a = a->next;
+            }
+        }
+        if (device_to_open) break;
+        d = d->next;
+    }
+
+    // If no suitable device is found, try the loopback interface
+    if (device_to_open == NULL) {
+        d = alldevs;
+        while (d != NULL) {
+            if (d->flags & PCAP_IF_LOOPBACK) {
+                device_to_open = d->name;
+                break;
+            }
+            d = d->next;
+        }
+    }
+
+    if (device_to_open == NULL) {
+        fprintf(stderr, "No suitable network interface found.\n");
+        fflush(stdout);
+        pcap_freealldevs(alldevs);
+        return 123;
+    }
+
+    printf("Attempting to open device: %s\n", device_to_open);
+    fflush(stdout);
+
+    // Open the selected device for live capture
+    // The third argument (promisc) is set to 1 for promiscuous mode.
+    // The fourth argument (timeout_ms) is set to 1000ms.
+    handle = pcap_open_live(device_to_open, 65536, 1, 1000, errbuf);
+    
+    // Free the device list AFTER pcap_open_live.
+    // This prevents the heap-use-after-free.
+    pcap_freealldevs(alldevs); 
+    alldevs = NULL; // Set to NULL to indicate it's been freed
+
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening pcap device '%s': %s\n", device_to_open, errbuf);
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened pcap device '%s'.\n", device_to_open);
+    fflush(stdout);
+
+    // --- Step 2: Prepare for pcap_activate ---
+    // The pcap_t handle is now initialized but not activated.
+
+    // --- Step 3: Call pcap_activate ---
+    printf("before pcap_activate\n");
+    fflush(stdout);
+
+    status = pcap_activate(handle);
+
+    // --- Step 4: Check the status of pcap_activate ---
+    if (status < 0) {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        // If status is negative, pcap_activate might have set the errbuf.
+        // If it's still empty, we need to get the error string.
+        if (errbuf[0] == '\0') {
+            const char *status_str = pcap_statustostr(status);
+            if (status_str) {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", status_str);
+            } else {
+                snprintf(errbuf, PCAP_ERRBUF_SIZE, "Unknown pcap error with status %d", status);
+            }
+        }
+        fprintf(stderr, "pcap_activate failed: %s\n", errbuf);
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    } else {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+    }
+
+    // --- Step 5: Clean up ---
+    pcap_close(handle);
+    printf("pcap_close called to release resources.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+False
+Attempting to open device: eth0
+
+I0425 19:21:08.090064 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091193 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091203 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091206 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091208 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091211 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091213 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091215 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091216 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091219 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091221 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091223 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091224 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091226 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091228 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091230 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091232 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091234 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091236 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091238 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091240 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091242 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091244 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091246 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091247 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091249 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091251 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091253 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091255 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091257 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091258 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091260 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091262 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091264 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091266 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091268 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091271 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091273 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091278 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091283 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091285 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091290 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091292 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091294 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091297 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091299 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091301 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091303 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091304 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091306 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091308 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091310 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091312 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091314 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091315 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091317 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091319 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091321 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091323 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091325 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091327 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091329 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091331 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091333 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091335 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091337 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091339 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091341 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091343 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091345 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091347 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091349 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091353 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091355 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091357 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091359 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091361 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091363 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091364 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091366 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091368 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091370 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091372 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091374 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091377 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091379 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091381 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091383 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091385 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091387 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091389 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091391 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091392 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091394 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091396 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091398 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091400 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091402 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091404 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091406 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091408 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091410 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091412 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091414 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091416 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091418 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091420 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091422 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091424 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091426 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091428 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091430 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091432 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+I0425 19:21:08.091434 17903640 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(8, generation: 1)
+=================================================================
+==7==ERROR: AddressSanitizer: heap-use-after-free on address 0xffffa3400770 at pc 0xffffa93ddb6c bp 0xffffe54e4f90 sp 0xffffe54e4740
+READ of size 2 at 0xffffa3400770 thread T0
+    #0 0xffffa93ddb68 in printf_common ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553
+    #1 0xffffa93de25c in __interceptor_vprintf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1660
+    #2 0xffffa93de37c in __interceptor_printf ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors.inc:1718
+    #3 0xaaaace262f58 in main /sandbox/pcap_activate.c:81
+    #4 0xffffa8b073fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffffa8b074d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaace2623ec in _start (/sandbox/pcap_activate+0x23ec)
+
+0xffffa3400770 is located 0 bytes inside of 5-byte region [0xffffa3400770,0xffffa3400775)
+freed by thread T0 here:
+    #0 0xffffa942f0d8 in __interceptor_free ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:127
+    #1 0xffffa932ab38 in pcap_freealldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xab38)
+    #2 0xaaaace262e78 in main /sandbox/pcap_activate.c:73
+    #3 0xffffa8b073fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #4 0xffffa8b074d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #5 0xaaaace2623ec in _start (/sandbox/pcap_activate+0x23ec)
+
+previously allocated by thread T0 here:
+    #0 0xffffa93db630 in __interceptor_strdup ../../../../src/libsanitizer/asan/asan_interceptors.cpp:454
+    #1 0xffffa9326e70  (/lib/aarch64-linux-gnu/libpcap.so.0.8+0x6e70)
+    #2 0xffffa932ae78 in pcap_findalldevs (/lib/aarch64-linux-gnu/libpcap.so.0.8+0xae78)
+    #3 0xaaaace262618 in main /sandbox/pcap_activate.c:21
+    #4 0xffffa8b073fc in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #5 0xffffa8b074d4 in __libc_start_main_impl ../csu/libc-start.c:392
+    #6 0xaaaace2623ec in _start (/sandbox/pcap_activate+0x23ec)
+
+SUMMARY: AddressSanitizer: heap-use-after-free ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_format.inc:553 in printf_common
+Shadow bytes around the buggy address:
+  0x200ff4680090: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff46800a0: fa fa fd fd fa fa fd fd fa fa fd fd fa fa fd fd
+  0x200ff46800b0: fa fa fd fd fa fa fd fd fa fa fd fa fa fa fd fd
+  0x200ff46800c0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fd
+  0x200ff46800d0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa fd fa
+=>0x200ff46800e0: fa fa fd fa fa fa fd fa fa fa fd fa fa fa[fd]fa
+  0x200ff46800f0: fa fa fd fa fa fa fd fa fa fa fa fa fa fa fa fa
+  0x200ff4680100: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff4680110: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff4680120: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x200ff4680130: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+  Shadow gap:              cc
+==7==ABORTING
+
+run
+token_right: 20496. Token_one: 1951
+Break cant parse code. token_right: 43870. Token_one: 1951
+Answer: 

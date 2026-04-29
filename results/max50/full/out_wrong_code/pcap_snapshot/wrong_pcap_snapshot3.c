@@ -1,0 +1,94 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = NULL;
+    int snapshot_len;
+
+    // Task 1: Invocation Specification Analysis
+    // The pcap_snapshot function requires a valid, non-NULL pcap_t pointer `p`.
+    // The function then checks `p->activated`. If it's not activated, it returns
+    // `PCAP_ERROR_NOT_ACTIVATED`. To correctly call this function, the caller
+    // must ensure that a `pcap_t` handle has been created. If the goal is to
+    // demonstrate the `PCAP_ERROR_NOT_ACTIVATED` case, the handle should *not*
+    // be activated. If the goal is to retrieve a valid snapshot length, the
+    // handle *must* be activated.
+
+    // Task2.2: Non-interactive and no infinite loops.
+    // Task2.3: Check API call status.
+    // Task2.7: File name should be example.xxx. (Not applicable here)
+
+    // The run result shows memory leaks. This indicates that resources allocated
+    // by pcap_create were not properly freed. We need to ensure `pcap_close` is
+    // called. Even if `pcap_create` succeeds but `pcap_activate` fails (or is
+    // not called), `pcap_close` should still be called on the handle returned
+    // by `pcap_create` to release its resources.
+
+    // Create a pcap handle. We use "non_existent_interface_for_testing" to
+    // ensure that pcap_activate would fail if we were to call it, thus
+    // allowing us to test the PCAP_ERROR_NOT_ACTIVATED path.
+    handle = pcap_create("non_existent_interface_for_testing", errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "pcap_create failed: %s\n", errbuf);
+        fflush(stderr);
+        // Task2.3: Return 123 on failure.
+        return 123;
+    }
+    printf("pcap_create succeeded.\n");
+    fflush(stdout);
+
+    // VIOLATION: Close the handle immediately after creation but before calling pcap_snapshot.
+    // This creates a dangling pointer scenario for pcap_snapshot.
+    pcap_close(handle);
+    printf("pcap_close called immediately after pcap_create.\n");
+    fflush(stdout);
+
+    // Task2.6: Add the specified printf before calling pcap_snapshot.
+    printf("before pcap_snapshot\n");
+    fflush(stdout);
+
+    // Task2.3 & 2.5: Check call status and output messages.
+    // This call will now operate on a closed handle, violating the rule.
+    snapshot_len = pcap_snapshot(handle);
+
+    // pcap_snapshot returns a negative value on error.
+    if (snapshot_len < 0) {
+        printf("Calling pcap_snapshot fail\n");
+        fflush(stdout);
+        // Task2.3: Infer cause of error.
+        if (snapshot_len == PCAP_ERROR_NOT_ACTIVATED) {
+            // This error might still be reported, but the underlying cause is the dangling pointer.
+            fprintf(stderr, "pcap_snapshot error: PCAP_ERROR_NOT_ACTIVATED. The pcap handle was not activated.\n");
+            fflush(stderr);
+        } else {
+            // Other errors might also occur due to the invalid handle.
+            fprintf(stderr, "pcap_snapshot encountered an unexpected error with return code: %d\n", snapshot_len);
+            fflush(stderr);
+        }
+        // Task2.3: Return 123 on failure.
+        // Even though the handle is already closed, calling pcap_close again is generally safe
+        // as libpcap handles it. However, the primary violation is the use of the closed handle.
+        // We don't need to call pcap_close(handle) here again as it was already closed.
+        return 123;
+    } else {
+        printf("Calling pcap_snapshot success\n");
+        fflush(stdout);
+        printf("Snapshot length: %d\n", snapshot_len);
+        fflush(stdout);
+    }
+
+    // Task2.3: Clean up the handle to prevent memory leaks.
+    // This part of the code will not be reached if pcap_snapshot fails.
+    // If it were reached, pcap_close(handle) would be called again, which is safe.
+    // pcap_close(handle);
+
+    return 0;
+}
+

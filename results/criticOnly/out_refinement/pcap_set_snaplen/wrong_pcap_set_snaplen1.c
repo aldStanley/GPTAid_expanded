@@ -1,0 +1,127 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+// Structure for a minimal pcap global header
+typedef struct {
+    unsigned int magic_number;
+    unsigned short version_major;
+    unsigned short version_minor;
+    int thiszone;
+    unsigned int sigfigs;
+    unsigned int snaplen;
+    unsigned int network;
+} pcap_global_header;
+
+int main() {
+    pcap_t *handle = NULL;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int snaplen_value = 1024; // Example snapshot length
+    const char *dummy_filename = "example.pcap";
+
+    // Task2.7: Create a dummy pcap file with a minimal header for pcap_open_offline
+    FILE *dummy_file = fopen(dummy_filename, "wb");
+    if (dummy_file == NULL) {
+        fprintf(stderr, "Failed to create dummy pcap file '%s'.\n", dummy_filename);
+        fflush(stdout);
+        return 123;
+    }
+
+    pcap_global_header header;
+    header.magic_number = 0xa1b2c3d4; // Standard magic number for pcap files
+    header.version_major = 2;
+    header.version_minor = 4;
+    header.thiszone = 0;
+    header.sigfigs = 0;
+    header.snaplen = 0; // Can be 0 in the global header, individual packet snaplen is relevant
+    header.network = 1; // LINKTYPE_ETHERNET
+
+    if (fwrite(&header, sizeof(pcap_global_header), 1, dummy_file) != 1) {
+        fprintf(stderr, "Failed to write pcap header to '%s'.\n", dummy_filename);
+        fflush(stdout);
+        fclose(dummy_file);
+        unlink(dummy_filename); // Clean up the partially created file
+        return 123;
+    }
+    fclose(dummy_file);
+
+    // Task2.1: Create a pcap handle using pcap_open_offline.
+    // This ensures the handle is not activated for live capture, satisfying the
+    // prerequisite for pcap_set_snaplen.
+    handle = pcap_open_offline(dummy_filename, errbuf);
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to open dummy pcap file '%s': %s\n", dummy_filename, errbuf);
+        fflush(stdout);
+        // Clean up the dummy file
+        unlink(dummy_filename);
+        return 123;
+    }
+
+    // Task2.6: Add the required printf before the function call.
+    printf("before pcap_set_snaplen\n");
+    fflush(stdout);
+
+    // Task2.3 & 2.5: Call pcap_set_snaplen and check its status.
+    // We are calling the actual `pcap_set_snaplen` from the linked libpcap library.
+    // Since `pcap_open_offline` creates an unactivated handle, `pcap_check_activated`
+    // should return false, allowing `pcap_set_snaplen` to proceed.
+    //
+    // VIOLATION: To violate the rule "The `pcap_t` handle must be valid and not NULL",
+    // we will pass a NULL pointer to `pcap_set_snaplen`.
+    // This is consistent with the provided violation example.
+    int result = pcap_set_snaplen(NULL, snaplen_value); // Passing a NULL pointer
+
+    if (result == 0) {
+        printf("Calling pcap_set_snaplen success\n");
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_set_snaplen fail\n");
+        fflush(stdout);
+        // Task2.3: Output error message to infer the cause.
+        if (result == PCAP_ERROR_ACTIVATED) {
+            // This case should ideally not happen if pcap_open_offline is used correctly.
+            // If it does, it indicates an unexpected interpretation of "activated" by libpcap.
+            fprintf(stderr, "Error: pcap_set_snaplen failed because the capture device is already activated (unexpected with pcap_open_offline).\n");
+            fflush(stdout);
+        } else if (snaplen_value < 0) {
+            // Although the provided function doesn't explicitly check, a negative snaplen is invalid.
+            fprintf(stderr, "Error: pcap_set_snaplen failed because snapshot length cannot be negative.\n");
+            fflush(stdout);
+        }
+        else {
+            // For other errors, libpcap might provide more specific error codes or messages.
+            // pcap_geterr() can be used if the error happened during handle creation or later capture operations,
+            // but pcap_set_snaplen itself returns specific error codes.
+            // When passing NULL, libpcap typically returns PCAP_ERROR, which is -1.
+            fprintf(stderr, "Error: pcap_set_snaplen returned an error code: %d (Expected for NULL handle)\n", result);
+            fflush(stdout);
+        }
+        // Task2.3: Return 123 on failure.
+        // We don't close 'handle' here because it was successfully opened before the violation.
+        // However, in a real scenario where the violation occurs before handle creation,
+        // this cleanup might be different. For this specific violation, we still need to
+        // clean up the handle that was created.
+        if (handle != NULL) {
+            pcap_close(handle); // Close the handle if it was opened
+        }
+        // Clean up the dummy file
+        unlink(dummy_filename);
+        return 123;
+    }
+
+    // Task2.4: Flush stdout after any printf. (Handled above)
+
+    // Task2.7: File read operation (`pcap_open_offline`) used with "example.pcap".
+
+    // Clean up
+    pcap_close(handle); // Close the pcap handle
+    // Clean up the dummy file
+    unlink(dummy_filename);
+
+    return 0;
+}
+

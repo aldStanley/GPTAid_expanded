@@ -1,0 +1,500 @@
+Question: 
+Given the following function `pcap_parsesrcstr_ex` in library `libpcap`, Complete the following tasks.
+```
+int pcap_parsesrcstr_ex(const char *source, int *type, char *userinfo, char *host,
+    char *port, char *name, unsigned char *uses_ssl, char *errbuf){
+	char *scheme, *tmpuserinfo, *tmphost, *tmpport, *tmppath;
+
+	/* Initialization stuff */
+	if (userinfo)
+		*userinfo = '\0';
+	if (host)
+		*host = '\0';
+	if (port)
+		*port = '\0';
+	if (name)
+		*name = '\0';
+	if (uses_ssl)
+		*uses_ssl = 0;
+
+	/* Parse the source string */
+	if (pcap_parse_source(source, &scheme, &tmpuserinfo, &tmphost,
+	    &tmpport, &tmppath, errbuf) == -1) {
+		/*
+		 * Fail.
+		 */
+		return (-1);
+	}
+
+	if (scheme == NULL) {
+		/*
+		 * Local device.
+		 */
+		if (name && tmppath)
+			pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+		if (type)
+			*type = PCAP_SRC_IFLOCAL;
+		free(tmppath);
+		free(tmpport);
+		free(tmphost);
+		free(tmpuserinfo);
+		return (0);
+	}
+
+	int is_rpcap = 0;
+	if (strcmp(scheme, "rpcaps") == 0) {
+		is_rpcap = 1;
+		if (uses_ssl) *uses_ssl = 1;
+	} else if (strcmp(scheme, "rpcap") == 0) {
+		is_rpcap = 1;
+	}
+
+	if (is_rpcap) {
+		/*
+		 * rpcap[s]://
+		 *
+		 * pcap_parse_source() has already handled the case of
+		 * rpcap[s]://device
+		 */
+		if (userinfo && tmpuserinfo)
+			pcap_strlcpy(userinfo, tmpuserinfo, PCAP_BUF_SIZE);
+		if (host && tmphost)
+			pcap_strlcpy(host, tmphost, PCAP_BUF_SIZE);
+		if (port && tmpport)
+			pcap_strlcpy(port, tmpport, PCAP_BUF_SIZE);
+		if (name && tmppath)
+			pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+		if (type)
+			*type = PCAP_SRC_IFREMOTE;
+		free(tmppath);
+		free(tmpport);
+		free(tmphost);
+		free(tmpuserinfo);
+		free(scheme);
+		return (0);
+	}
+
+	if (strcmp(scheme, "file") == 0) {
+		/*
+		 * file://
+		 */
+		if (name && tmppath)
+			pcap_strlcpy(name, tmppath, PCAP_BUF_SIZE);
+		if (type)
+			*type = PCAP_SRC_FILE;
+		free(tmppath);
+		free(tmpport);
+		free(tmphost);
+		free(tmpuserinfo);
+		free(scheme);
+		return (0);
+	}
+
+	/*
+	 * Neither rpcap: nor file:; just treat the entire string
+	 * as a local device.
+	 */
+	if (name)
+		pcap_strlcpy(name, source, PCAP_BUF_SIZE);
+	if (type)
+		*type = PCAP_SRC_IFLOCAL;
+	free(tmppath);
+	free(tmpport);
+	free(tmphost);
+	free(tmpuserinfo);
+	free(scheme);
+	return (0);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_parsesrcstr_ex success" after calling `pcap_parsesrcstr_ex` successfully; Output: "Calling pcap_parsesrcstr_ex fail" after the call to `pcap_parsesrcstr_ex` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_parsesrcstr_ex\n")
+    ```
+    before calling `pcap_parsesrcstr_ex`. Make sure that there are no other function calls between this output and the calling to `pcap_parsesrcstr_ex`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+## Task 1: Invocation Specification Analysis
+
+The `pcap_parsesrcstr_ex` function is designed to parse a source string for libpcap, identifying different types of sources (local network interface, remote capture, file) and extracting relevant information like user credentials, host, port, and the source name.
+
+Here's a breakdown of the invocation specification the caller needs to follow:
+
+1.  **`source` (const char *):** This is a mandatory argument. It's a null-terminated string representing the capture source. Examples include:
+    *   Local interface: `"eth0"`, `"/dev/bpf0"`
+    *   Remote capture: `"rpcap://host:port/interface"`, `"rpcaps://host:port/interface"`
+    *   File: `"file://path/to/capture.pcap"`
+
+2.  **`type` (int *):** This is an optional output parameter. If provided (i.e., not `NULL`), it will be set to an integer representing the type of source parsed. The possible values are:
+    *   `PCAP_SRC_IFLOCAL` (local network interface)
+    *   `PCAP_SRC_IFREMOTE` (remote capture device)
+    *   `PCAP_SRC_FILE` (capture file)
+
+3.  **`userinfo` (char *):** This is an optional output parameter. If provided (i.e., not `NULL`), it will store any user authentication information (username and password) found in the source string (e.g., from `user:pass@host`). The buffer pointed to by `userinfo` must be large enough to hold this information. The function uses `PCAP_BUF_SIZE` for its internal buffer.
+
+4.  **`host` (char *):** This is an optional output parameter. If provided (i.e., not `NULL`), it will store the hostname or IP address of the remote capture server. The buffer pointed to by `host` must be large enough to hold this information.
+
+5.  **`port` (char *):** This is an optional output parameter. If provided (i.e., not `NULL`), it will store the port number of the remote capture server. The buffer pointed to by `port` must be large enough to hold this information.
+
+6.  **`name` (char *):** This is an optional output parameter. If provided (i.e., not `NULL`), it will store the name of the network interface or the path to the capture file. The buffer pointed to by `name` must be large enough to hold this information.
+
+7.  **`uses_ssl` (unsigned char *):** This is an optional output parameter. If provided (i.e., not `NULL`), it will be set to `1` if the `rpcaps` scheme (SSL/TLS encryption) is used for remote capture, and `0` otherwise.
+
+8.  **`errbuf` (char *):** This is a mandatory output parameter. It's a buffer that will be filled with an error message if the function fails. The caller must provide a sufficiently sized buffer for error reporting.
+
+**Return Value:**
+*   `0` on success.
+*   `-1` on failure.
+
+**Memory Management:**
+The function allocates memory for `scheme`, `tmpuserinfo`, `tmphost`, `tmpport`, and `tmppath`. The caller **does not** need to free this memory. The function itself frees this memory before returning.
+
+**Buffer Size:**
+The function uses `PCAP_BUF_SIZE` for copying extracted strings into the output parameters (`userinfo`, `host`, `port`, `name`). The caller should ensure that the provided buffers for these parameters are at least as large as `PCAP_BUF_SIZE` to avoid truncation.
+
+**Error Handling:**
+The caller **must** check the return value of `pcap_parsesrcstr_ex`. If it returns `-1`, the `errbuf` should be inspected for details about the error.
+
+## Task 2: Complete Code Example
+
+This code demonstrates how to call `pcap_parsesrcstr_ex` in a non-interactive Linux environment, adhering to all specified requirements.
+
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h> // For sleep
+
+// Define PCAP_BUF_SIZE if it's not already defined by pcap.h (it usually is)
+#ifndef PCAP_BUF_SIZE
+#define PCAP_BUF_SIZE 256
+#endif
+
+int main() {
+    // Example source strings to test
+    const char *sources_to_test[] = {
+        "eth0",                         // Local interface
+        "file:///tmp/example.pcap",     // Local file
+        "rpcap://192.168.1.100:2002/eth1", // Remote capture (no SSL)
+        "rpcaps://user:pass@remote.server.com:2003/wlan0", // Remote capture (SSL)
+        "invalid_scheme://device"       // Invalid scheme
+    };
+    int num_sources = sizeof(sources_to_test) / sizeof(sources_to_test[0]);
+
+    for (int i = 0; i < num_sources; ++i) {
+        printf("Testing source: %s\n", sources_to_test[i]);
+        fflush(stdout);
+
+        int type = 0;
+        char userinfo_buf[PCAP_BUF_SIZE];
+        char host_buf[PCAP_BUF_SIZE];
+        char port_buf[PCAP_BUF_SIZE];
+        char name_buf[PCAP_BUF_SIZE];
+        unsigned char uses_ssl = 0;
+        char errbuf[PCAP_ERRBUF_SIZE]; // Standard pcap error buffer size
+
+        // Initialize output buffers to empty strings
+        userinfo_buf[0] = '\0';
+        host_buf[0] = '\0';
+        port_buf[0] = '\0';
+        name_buf[0] = '\0';
+
+        // Task 6: Add line before calling pcap_parsesrcstr_ex
+        printf("before pcap_parsesrcstr_ex\n");
+        fflush(stdout);
+
+        int result = pcap_parsesrcstr_ex(
+            sources_to_test[i],
+            &type,
+            userinfo_buf,
+            host_buf,
+            port_buf,
+            name_buf,
+            &uses_ssl,
+            errbuf
+        );
+
+        // Task 5: Output success or failure message
+        if (result == 0) {
+            printf("Calling pcap_parsesrcstr_ex success\n");
+            fflush(stdout);
+
+            // Print parsed information
+            printf("  Parsed Type: ");
+            switch (type) {
+                case PCAP_SRC_IFLOCAL:
+                    printf("PCAP_SRC_IFLOCAL\n");
+                    break;
+                case PCAP_SRC_IFREMOTE:
+                    printf("PCAP_SRC_IFREMOTE\n");
+                    break;
+                case PCAP_SRC_FILE:
+                    printf("PCAP_SRC_FILE\n");
+                    break;
+                default:
+                    printf("Unknown (%d)\n", type);
+                    break;
+            }
+            fflush(stdout);
+
+            if (userinfo_buf[0] != '\0') {
+                printf("  User Info: %s\n", userinfo_buf);
+                fflush(stdout);
+            }
+            if (host_buf[0] != '\0') {
+                printf("  Host: %s\n", host_buf);
+                fflush(stdout);
+            }
+            if (port_buf[0] != '\0') {
+                printf("  Port: %s\n", port_buf);
+                fflush(stdout);
+            }
+            if (name_buf[0] != '\0') {
+                printf("  Name: %s\n", name_buf);
+                fflush(stdout);
+            }
+            if (uses_ssl != 0) {
+                printf("  Uses SSL: Yes\n");
+                fflush(stdout);
+            }
+        } else {
+            // Task 3: Check API status and output error message
+            printf("Calling pcap_parsesrcstr_ex fail\n");
+            fflush(stdout);
+            fprintf(stderr, "Error parsing source string '%s': %s\n", sources_to_test[i], errbuf);
+            fflush(stderr);
+            return 123; // Task 3: Return specific error code on failure
+        }
+
+        // Small delay to make output readable if running multiple tests quickly
+        usleep(100000);
+    }
+
+    // Example for a file that might not exist, to show error handling for file sources
+    printf("\nTesting a non-existent file source:\n");
+    fflush(stdout);
+
+    int type = 0;
+    char userinfo_buf[PCAP_BUF_SIZE];
+    char host_buf[PCAP_BUF_SIZE];
+    char port_buf[PCAP_BUF_SIZE];
+    char name_buf[PCAP_BUF_SIZE];
+    unsigned char uses_ssl = 0;
+    char errbuf[PCAP_ERRBUF_SIZE];
+
+    userinfo_buf[0] = '\0';
+    host_buf[0] = '\0';
+    port_buf[0] = '\0';
+    name_buf[0] = '\0';
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+
+    int result = pcap_parsesrcstr_ex(
+        "file:///non_existent_dir/example.pcap", // Task 7: File name format
+        &type,
+        userinfo_buf,
+        host_buf,
+        port_buf,
+        name_buf,
+        &uses_ssl,
+        errbuf
+    );
+
+    if (result == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        // This block is unlikely to be hit for a non-existent file with 'file://' scheme
+        printf("  Parsed Name: %s\n", name_buf);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing source string 'file:///non_existent_dir/example.pcap': %s\n", errbuf);
+        fflush(stderr);
+        // In a real application, you might decide to return here or continue
+    }
+
+    return 0;
+}
+```
+ parse code: 
+
+ Run result: 
+False
+The code you generated did not call the API `pcap_parsesrcstr_ex`, I am sure this api exists in this library, please check and make sure you call this api.
+noapi
+Break cant parse code. token_right: 9252. Token_one: 3791
+Answer: 
+```c
+#include <pcap.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+// Define PCAP_BUF_SIZE if it's not already defined by pcap.h (it usually is)
+#ifndef PCAP_BUF_SIZE
+#define PCAP_BUF_SIZE 256
+#endif
+
+int main() {
+    // Example source strings to test
+    const char *sources_to_test[] = {
+        "eth0",                         // Local interface
+        "file:///tmp/example.pcap",     // Local file
+        "rpcap://192.168.1.100:2002/eth1", // Remote capture (no SSL)
+        "rpcaps://user:pass@remote.server.com:2003/wlan0", // Remote capture (SSL)
+        "invalid_scheme://device"       // Invalid scheme
+    };
+    int num_sources = sizeof(sources_to_test) / sizeof(sources_to_test[0]);
+
+    for (int i = 0; i < num_sources; ++i) {
+        printf("Testing source: %s\n", sources_to_test[i]);
+        fflush(stdout);
+
+        int type = 0;
+        char userinfo_buf[PCAP_BUF_SIZE];
+        char host_buf[PCAP_BUF_SIZE];
+        char port_buf[PCAP_BUF_SIZE];
+        char name_buf[PCAP_BUF_SIZE];
+        unsigned char uses_ssl = 0;
+        char errbuf[PCAP_ERRBUF_SIZE]; // Standard pcap error buffer size
+
+        // Initialize output buffers to empty strings
+        userinfo_buf[0] = '\0';
+        host_buf[0] = '\0';
+        port_buf[0] = '\0';
+        name_buf[0] = '\0';
+
+        // Task 6: Add line before calling pcap_parsesrcstr_ex
+        printf("before pcap_parsesrcstr_ex\n");
+        fflush(stdout);
+
+        // Task 2: Call the function
+        int result = pcap_parsesrcstr_ex(
+            sources_to_test[i],
+            &type,
+            userinfo_buf,
+            host_buf,
+            port_buf,
+            name_buf,
+            &uses_ssl,
+            errbuf
+        );
+
+        // Task 5: Output success or failure message
+        if (result == 0) {
+            printf("Calling pcap_parsesrcstr_ex success\n");
+            fflush(stdout);
+
+            // Print parsed information
+            printf("  Parsed Type: ");
+            switch (type) {
+                case PCAP_SRC_IFLOCAL:
+                    printf("PCAP_SRC_IFLOCAL\n");
+                    break;
+                case PCAP_SRC_IFREMOTE:
+                    printf("PCAP_SRC_IFREMOTE\n");
+                    break;
+                case PCAP_SRC_FILE:
+                    printf("PCAP_SRC_FILE\n");
+                    break;
+                default:
+                    printf("Unknown (%d)\n", type);
+                    break;
+            }
+            fflush(stdout);
+
+            if (userinfo_buf[0] != '\0') {
+                printf("  User Info: %s\n", userinfo_buf);
+                fflush(stdout);
+            }
+            if (host_buf[0] != '\0') {
+                printf("  Host: %s\n", host_buf);
+                fflush(stdout);
+            }
+            if (port_buf[0] != '\0') {
+                printf("  Port: %s\n", port_buf);
+                fflush(stdout);
+            }
+            if (name_buf[0] != '\0') {
+                printf("  Name: %s\n", name_buf);
+                fflush(stdout);
+            }
+            if (uses_ssl != 0) {
+                printf("  Uses SSL: Yes\n");
+                fflush(stdout);
+            }
+        } else {
+            // Task 3: Check API status and output error message
+            printf("Calling pcap_parsesrcstr_ex fail\n");
+            fflush(stdout);
+            fprintf(stderr, "Error parsing source string '%s': %s\n", sources_to_test[i], errbuf);
+            fflush(stderr);
+            return 123; // Task 3: Return specific error code on failure
+        }
+
+        // Small delay to make output readable if running multiple tests quickly
+        usleep(100000);
+    }
+
+    // Example for a file that might not exist, to show error handling for file sources
+    printf("\nTesting a non-existent file source:\n");
+    fflush(stdout);
+
+    int type = 0;
+    char userinfo_buf[PCAP_BUF_SIZE];
+    char host_buf[PCAP_BUF_SIZE];
+    char port_buf[PCAP_BUF_SIZE];
+    char name_buf[PCAP_BUF_SIZE];
+    unsigned char uses_ssl = 0;
+    char errbuf[PCAP_ERRBUF_SIZE];
+
+    userinfo_buf[0] = '\0';
+    host_buf[0] = '\0';
+    port_buf[0] = '\0';
+    name_buf[0] = '\0';
+
+    printf("before pcap_parsesrcstr_ex\n");
+    fflush(stdout);
+
+    int result = pcap_parsesrcstr_ex(
+        "file:///non_existent_dir/example.pcap", // Task 7: File name format
+        &type,
+        userinfo_buf,
+        host_buf,
+        port_buf,
+        name_buf,
+        &uses_ssl,
+        errbuf
+    );
+
+    if (result == 0) {
+        printf("Calling pcap_parsesrcstr_ex success\n");
+        fflush(stdout);
+        // This block is unlikely to be hit for a non-existent file with 'file://' scheme
+        printf("  Parsed Name: %s\n", name_buf);
+        fflush(stdout);
+    } else {
+        printf("Calling pcap_parsesrcstr_ex fail\n");
+        fflush(stdout);
+        fprintf(stderr, "Error parsing source string 'file:///non_existent_dir/example.pcap': %s\n", errbuf);
+        fflush(stderr);
+        // In a real application, you might decide to return here or continue
+    }
+
+    return 0;
+}
+```

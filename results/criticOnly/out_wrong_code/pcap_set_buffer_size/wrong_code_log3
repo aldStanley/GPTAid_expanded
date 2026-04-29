@@ -1,0 +1,566 @@
+Question: 
+1.Declaration of `pcap_set_buffer_size`:
+```
+int pcap_set_buffer_size(pcap_t *p, int buffer_size)
+```
+2.Right Code that calls `pcap_set_buffer_size`:
+```
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+    int buffer_size_to_set = 1024 * 1024; // Example buffer size: 1MB
+
+    // Task2.1: Open a device for capturing. We need a valid pcap_t pointer to call pcap_set_buffer_size.
+    // The core issue is that `pcap_set_buffer_size` fails because the device is already activated.
+    // This implies that `pcap_check_activated(p)` returns true.
+    // `pcap_open_live` itself is not supposed to activate the device, but the underlying OS or
+    // system might have the interface in an active state for sniffing that `libpcap` detects.
+    // The only way to guarantee `pcap_set_buffer_size` works is to call it *before* any
+    // function that would explicitly activate the capture handle (like `pcap_loop`, `pcap_dispatch`, `pcap_start_with_filter`).
+    // The current code calls `pcap_set_buffer_size` immediately after `pcap_open_live`, which should be correct.
+    // If the error persists, it points to an environmental issue where the interface is considered "activated" by the system
+    // even upon `pcap_open_live`.
+
+    // To try and mitigate this, we will explicitly set the timeout for `pcap_open_live` to 0.
+    // This is sometimes recommended to ensure `pcap_open_live` returns as quickly as possible
+    // and doesn't implicitly do anything that might lead to activation.
+    // However, `pcap_set_buffer_size` should ideally be called *before* starting any capture process.
+
+    // Find the first available interface. If none, report error.
+    char *dev = pcap_lookupdev(errbuf);
+    if (dev == NULL) {
+        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
+        printf("Failed to find a pcap device.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Found default device: %s\n", dev);
+    fflush(stdout);
+
+    // Use a small timeout (0) for pcap_open_live to try and avoid implicit activation.
+    handle = pcap_open_live(dev, BUFSIZ, 0, 0, errbuf); // Promiscuous mode = 0, Timeout = 0
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening adapter '%s': %s\n", dev, errbuf);
+        printf("Failed to open pcap device.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened a pcap handle.\n");
+    fflush(stdout);
+
+    // Task2.6: Add the required printf before calling pcap_set_buffer_size
+    printf("before pcap_set_buffer_size\n");
+    fflush(stdout);
+
+    // Task2.1 & Task 1: Invoke pcap_set_buffer_size.
+    // Invocation Specification:
+    // 1. The pcap_t pointer 'p' must be a valid, initialized pcap handle obtained from functions like pcap_open_live.
+    // 2. The handle 'p' must NOT be activated (i.e., pcap_loop, pcap_dispatch, pcap_start_with_filter are not called on it).
+    // 3. buffer_size must be a positive integer. If buffer_size <= 0, the function silently returns 0 (success).
+
+    // The failure indicates `pcap_check_activated(p)` is true.
+    // The provided source code for `pcap_set_buffer_size` clearly states:
+    // `if (pcap_check_activated(p)) return (PCAP_ERROR_ACTIVATED);`
+    // This means `pcap_check_activated(p)` *is* returning true.
+    // The only way to guarantee `pcap_check_activated` returns false is to ensure no capture has started.
+    // `pcap_open_live` without starting a capture loop should not activate it.
+    // If it's still reporting activated, it's a very subtle OS/driver interaction or a libpcap configuration issue.
+    // For the purpose of a "runnable" example that *doesn't* hit this error, and given `pcap_set_buffer_size` is meant
+    // to be called before capture, we will trust that `pcap_open_live` with minimal parameters is the correct approach.
+
+    int result = pcap_set_buffer_size(handle, buffer_size_to_set);
+
+    // Task2.3 & Task2.5: Check the call status and output accordingly.
+    if (result == 0) {
+        printf("Calling pcap_set_buffer_size success\n");
+        fflush(stdout);
+    } else {
+        // If we are here, it means result is not 0.
+        // The function only returns PCAP_ERROR_ACTIVATED (which is negative) or 0.
+        // Thus, if result != 0, it must be PCAP_ERROR_ACTIVATED.
+        fprintf(stderr, "pcap_set_buffer_size failed: Device is already activated.\n");
+        fflush(stdout);
+        printf("Calling pcap_set_buffer_size fail\n");
+        fflush(stdout);
+        pcap_close(handle); // Clean up the handle
+        return 123;
+    }
+
+    // Task2.4: Flush stdout after each printf is handled above.
+
+    // Task2.7: No file read operations are explicitly needed for this function call demonstration.
+
+    // Clean up
+    pcap_close(handle);
+    printf("Pcap handle closed.\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+```
+"""
+
+Based on the above information, please modify the right code to violate this rule:
+Parameter 1: **Rule: Ensure that the `pcap_t` pointer passed to `pcap_set_buffer_size` is not a dangling pointer.**
+Here is an example of a code that VIOLATES the rule; analyze the code to determine how to violate the rule by modifying the right code, as this violation example code indicates. Your modified code must to be **consistent** with the way the example code is violated.
+violation code example:
+```
+// Violation Code: DANGLING_PCAP_HANDLE
+pcap_t *p = pcap_open_live("eth0", 100, 1, 0, errbuf);
+if (p) {
+pcap_close(p); // p is now a dangling pointer
+pcap_set_buffer_size(p, 4096); // Use-after-free
+}
+```
+Please ensure the following conditions are met in your response:
+Generate a complete, compilable code suitable for a Linux environment, including a main function. The code provided should not be a fragment but a complete, executable program.
+
+Answer: 
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+    int buffer_size_to_set = 1024 * 1024; // Example buffer size: 1MB
+
+    // Find the first available interface. If none, report error.
+    char *dev = pcap_lookupdev(errbuf);
+    if (dev == NULL) {
+        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
+        printf("Failed to find a pcap device.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Found default device: %s\n", dev);
+    fflush(stdout);
+
+    // Use a small timeout (0) for pcap_open_live to try and avoid implicit activation.
+    handle = pcap_open_live(dev, BUFSIZ, 0, 0, errbuf); // Promiscuous mode = 0, Timeout = 0
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening adapter '%s': %s\n", dev, errbuf);
+        printf("Failed to open pcap device.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened a pcap handle.\n");
+    fflush(stdout);
+
+    // --- VIOLATION START ---
+    // Close the handle *before* calling pcap_set_buffer_size.
+    // This makes 'handle' a dangling pointer.
+    pcap_close(handle);
+    printf("Pcap handle closed prematurely, making it a dangling pointer.\n");
+    fflush(stdout);
+
+    // Task2.6: Add the required printf before calling pcap_set_buffer_size
+    printf("before pcap_set_buffer_size\n");
+    fflush(stdout);
+
+    // Task2.1 & Task 1: Invoke pcap_set_buffer_size with a dangling pointer.
+    // This violates the rule: "Ensure that the pcap_t pointer passed to pcap_set_buffer_size is not a dangling pointer."
+    int result = pcap_set_buffer_size(handle, buffer_size_to_set);
+    // --- VIOLATION END ---
+
+    // Task2.3 & Task2.5: Check the call status and output accordingly.
+    // Note: The behavior of calling pcap_set_buffer_size on a dangling pointer is undefined.
+    // It might crash, return an error, or exhibit other unpredictable behavior.
+    // We will still check the result for completeness, but the primary goal is the violation.
+    if (result == 0) {
+        printf("Calling pcap_set_buffer_size success (unexpected on dangling pointer)\n");
+        fflush(stdout);
+    } else {
+        // If we are here, it means result is not 0.
+        // The function only returns PCAP_ERROR_ACTIVATED (which is negative) or 0.
+        // Thus, if result != 0, it must be PCAP_ERROR_ACTIVATED or some other error.
+        fprintf(stderr, "pcap_set_buffer_size failed (expected on dangling pointer).\n");
+        fflush(stdout);
+        printf("Calling pcap_set_buffer_size fail\n");
+        fflush(stdout);
+        // No need to close handle here as it was already closed.
+        return 123;
+    }
+
+    // Task2.4: Flush stdout after each printf is handled above.
+
+    // Task2.7: No file read operations are explicitly needed for this function call demonstration.
+
+    // Clean up
+    // This call might be problematic if the handle is already invalid due to the prior close.
+    // However, for the purpose of demonstrating the violation, we leave it.
+    // In a real scenario, this would be a bug.
+    // pcap_close(handle); // This would be a double-free or use-after-free if handle is truly invalid.
+    printf("Attempted to close pcap handle again (may be problematic).\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+
+
+int main() {
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle;
+    int buffer_size_to_set = 1024 * 1024; // Example buffer size: 1MB
+
+    // Find the first available interface. If none, report error.
+    char *dev = pcap_lookupdev(errbuf);
+    if (dev == NULL) {
+        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
+        printf("Failed to find a pcap device.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Found default device: %s\n", dev);
+    fflush(stdout);
+
+    // Use a small timeout (0) for pcap_open_live to try and avoid implicit activation.
+    handle = pcap_open_live(dev, BUFSIZ, 0, 0, errbuf); // Promiscuous mode = 0, Timeout = 0
+    if (handle == NULL) {
+        fprintf(stderr, "Error opening adapter '%s': %s\n", dev, errbuf);
+        printf("Failed to open pcap device.\n");
+        fflush(stdout);
+        return 123;
+    }
+    printf("Successfully opened a pcap handle.\n");
+    fflush(stdout);
+
+    // --- VIOLATION START ---
+    // Close the handle *before* calling pcap_set_buffer_size.
+    // This makes 'handle' a dangling pointer.
+    pcap_close(handle);
+    printf("Pcap handle closed prematurely, making it a dangling pointer.\n");
+    fflush(stdout);
+
+    // Task2.6: Add the required printf before calling pcap_set_buffer_size
+    printf("before pcap_set_buffer_size\n");
+    fflush(stdout);
+
+    // Task2.1 & Task 1: Invoke pcap_set_buffer_size with a dangling pointer.
+    // This violates the rule: "Ensure that the pcap_t pointer passed to pcap_set_buffer_size is not a dangling pointer."
+    int result = pcap_set_buffer_size(handle, buffer_size_to_set);
+    // --- VIOLATION END ---
+
+    // Task2.3 & Task2.5: Check the call status and output accordingly.
+    // Note: The behavior of calling pcap_set_buffer_size on a dangling pointer is undefined.
+    // It might crash, return an error, or exhibit other unpredictable behavior.
+    // We will still check the result for completeness, but the primary goal is the violation.
+    if (result == 0) {
+        printf("Calling pcap_set_buffer_size success (unexpected on dangling pointer)\n");
+        fflush(stdout);
+    } else {
+        // If we are here, it means result is not 0.
+        // The function only returns PCAP_ERROR_ACTIVATED (which is negative) or 0.
+        // Thus, if result != 0, it must be PCAP_ERROR_ACTIVATED or some other error.
+        fprintf(stderr, "pcap_set_buffer_size failed (expected on dangling pointer).\n");
+        fflush(stdout);
+        printf("Calling pcap_set_buffer_size fail\n");
+        fflush(stdout);
+        // No need to close handle here as it was already closed.
+        return 123;
+    }
+
+    // Task2.4: Flush stdout after each printf is handled above.
+
+    // Task2.7: No file read operations are explicitly needed for this function call demonstration.
+
+    // Clean up
+    // This call might be problematic if the handle is already invalid due to the prior close.
+    // However, for the purpose of demonstrating the violation, we leave it.
+    // In a real scenario, this would be a bug.
+    // pcap_close(handle); // This would be a double-free or use-after-free if handle is truly invalid.
+    printf("Attempted to close pcap handle again (may be problematic).\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+
+ Run result: 
+False
+Found default device: eth0
+Successfully opened a pcap handle.
+Pcap handle closed prematurely, making it a dangling pointer.
+before pcap_set_buffer_size
+Calling pcap_set_buffer_size fail
+
+I0423 15:48:24.179869 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180505 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180526 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180528 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180530 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180533 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180535 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180537 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180539 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180542 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180544 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180546 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180548 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180550 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180552 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180554 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180556 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180558 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180561 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180563 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180565 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180566 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180568 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180570 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180572 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180574 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180575 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180577 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180579 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180581 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180583 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180585 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180587 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180588 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180590 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180592 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180595 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180597 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180599 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180601 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180603 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180604 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180606 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180608 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180610 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180612 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180613 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180615 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180617 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180619 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180621 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180622 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180624 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180626 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180628 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180630 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180632 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180633 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180635 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180637 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180639 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180641 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180643 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180644 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180646 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180648 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180650 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180652 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180653 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180655 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180657 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180659 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180662 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180664 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180666 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180668 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180670 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180671 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180673 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180675 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180677 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180679 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180680 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180682 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180684 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180686 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180688 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180690 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180691 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180693 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180695 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180697 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180699 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180700 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180702 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180704 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180706 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180708 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180710 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180711 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180713 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180715 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180717 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180718 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180720 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180722 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180724 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180726 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180728 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180729 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180731 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180733 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180735 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180737 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180739 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180740 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180742 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180744 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180746 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180748 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180750 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180751 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180753 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180755 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180757 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180759 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180761 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180763 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180765 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180767 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180768 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180770 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180772 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180774 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180776 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180778 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180780 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180781 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180783 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180785 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180787 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180789 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180790 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180792 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180803 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180805 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180807 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180809 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180810 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180812 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180815 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180816 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180818 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180820 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180822 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180824 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180826 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180827 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180829 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180831 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180833 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180835 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180837 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180838 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180840 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180842 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180844 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180846 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180848 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180849 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180851 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180853 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180855 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180857 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180859 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180860 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180862 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180864 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180866 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180868 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180869 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180872 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180873 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180875 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180877 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180879 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180881 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180882 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180884 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180886 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180888 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180890 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180892 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180894 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180896 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180898 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180899 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180902 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180904 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180905 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180907 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180909 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180911 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180912 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180914 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180916 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180918 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180920 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180921 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180923 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180925 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+I0423 15:48:24.180927 15527526 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(6, generation: 1)
+==7== Invalid read of size 4
+==7==    at 0x489B754: pcap_set_buffer_size (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x108C9B: main (pcap_set_buffer_size.c:50)
+==7==  Address 0x4e8ecb0 is 112 bytes inside a block of size 792 free'd
+==7==    at 0x4867AD0: free (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==7==    by 0x108C57: main (pcap_set_buffer_size.c:40)
+==7==  Block was alloc'd at
+==7==    at 0x4869F34: calloc (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==7==    by 0x48B867B: ??? (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x489CB57: pcap_create (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x489CEB7: pcap_open_live (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x108BD7: main (pcap_set_buffer_size.c:27)
+==7== 
+==7== Invalid write of size 8
+==7==    at 0x489B784: pcap_set_buffer_size (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x108C9B: main (pcap_set_buffer_size.c:50)
+==7==  Address 0x4e8ed18 is 216 bytes inside a block of size 792 free'd
+==7==    at 0x4867AD0: free (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==7==    by 0x108C57: main (pcap_set_buffer_size.c:40)
+==7==  Block was alloc'd at
+==7==    at 0x4869F34: calloc (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==7==    by 0x48B867B: ??? (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x489CB57: pcap_create (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x489CEB7: pcap_open_live (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x108BD7: main (pcap_set_buffer_size.c:27)
+==7== 
+==7== Invalid write of size 8
+==7==    at 0x489B788: pcap_set_buffer_size (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x108C9B: main (pcap_set_buffer_size.c:50)
+==7==  Address 0x4e8ed36 is 246 bytes inside a block of size 792 free'd
+==7==    at 0x4867AD0: free (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==7==    by 0x108C57: main (pcap_set_buffer_size.c:40)
+==7==  Block was alloc'd at
+==7==    at 0x4869F34: calloc (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==7==    by 0x48B867B: ??? (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x489CB57: pcap_create (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x489CEB7: pcap_open_live (in /usr/lib/aarch64-linux-gnu/libpcap.so.1.10.1)
+==7==    by 0x108BD7: main (pcap_set_buffer_size.c:27)
+==7== 
+pcap_set_buffer_size failed (expected on dangling pointer).
+
+run
+judge rule re: right-rule
+debug code: 
+(['    int result = pcap_set_buffer_size(handle, buffer_size_to_set);', '    pcap_close(handle);', '    handle = pcap_open_live(dev, BUFSIZ, 0, 0, errbuf); // Promiscuous mode = 0, Timeout = 0', '    int result = pcap_set_buffer_size(handle, buffer_size_to_set);', '    pcap_close(handle);', '    handle = pcap_open_live(dev, BUFSIZ, 0, 0, errbuf); // Promiscuous mode = 0, Timeout = 0', '    int result = pcap_set_buffer_size(handle, buffer_size_to_set);', '    pcap_close(handle);', '    handle = pcap_open_live(dev, BUFSIZ, 0, 0, errbuf); // Promiscuous mode = 0, Timeout = 0'], [221, 224, 230, 234, 237, 243, 247, 250, 256])

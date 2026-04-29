@@ -1,0 +1,822 @@
+Question: 
+Given the following function `pcap_activate` in library `libpcap`, Complete the following tasks.
+```
+int pcap_activate(pcap_t *p){
+	int status;
+
+	/*
+	 * Catch attempts to re-activate an already-activated
+	 * pcap_t; this should, for example, catch code that
+	 * calls pcap_open_live() followed by pcap_activate(),
+	 * as some code that showed up in a Stack Exchange
+	 * question did.
+	 */
+	if (pcap_check_activated(p))
+		return (PCAP_ERROR_ACTIVATED);
+	status = p->activate_op(p);
+	if (status >= 0) {
+		/*
+		 * If somebody requested non-blocking mode before
+		 * calling pcap_activate(), turn it on now.
+		 */
+		if (p->opt.nonblock) {
+			status = p->setnonblock_op(p, 1);
+			if (status < 0) {
+				/*
+				 * Failed.  Undo everything done by
+				 * the activate operation.
+				 */
+				p->cleanup_op(p);
+				initialize_ops(p);
+				return (status);
+			}
+		}
+		p->activated = 1;
+	} else {
+		if (p->errbuf[0] == '\0') {
+			/*
+			 * No error message supplied by the activate routine;
+			 * for the benefit of programs that don't specially
+			 * handle errors other than PCAP_ERROR, return the
+			 * error message corresponding to the status.
+			 */
+			snprintf(p->errbuf, PCAP_ERRBUF_SIZE, "%s",
+			    pcap_statustostr(status));
+		}
+
+		/*
+		 * Undo any operation pointer setting, etc. done by
+		 * the activate operation.
+		 */
+		initialize_ops(p);
+	}
+	return (status);
+}
+
+```
+
+Task1: Analyze the function code to find the invocation specification that the caller needs to follow correctly.
+Task2: Generate a complete code that calls the function in Linux. The code needs to meet the following requirements:
+    1.The code is required to be compilable and follow the invocation specification of this function.
+    2.This code needs to be non-interactive and no infinite loops.
+    3.The code needs to check the call status of each API after the API returns(if API status can be checked). If API call fails, return 123 and output error message to infer the cause of the error. Every `printf` need to be different.
+    4. After any `printf`, please flush the stdout. 
+    5. Output: "Calling pcap_activate success" after calling `pcap_activate` successfully; Output: "Calling pcap_activate fail" after the call to `pcap_activate` has failed
+    6. Add line: 
+    ```
+    printf("before pcap_activate\n")
+    ```
+    before calling `pcap_activate`. Make sure that there are no other function calls between this output and the calling to `pcap_activate`
+    7. If there are some file read operations in the code, the file name should be `example.xxx` (xxx is file type, please replace 'xxx' to the type the code needs)
+    8. Be sure to output the code in this format: ```code``` 
+
+Answer: 
+## Task 1: Invocation Specification for `pcap_activate`
+
+Based on the provided `pcap_activate` function code, the caller needs to follow these invocation specifications:
+
+1.  **`pcap_t *p` must be a valid, initialized `pcap_t` structure:** The function expects a pointer to a `pcap_t` structure that has been previously created and populated, likely by a function like `pcap_open_live` or `pcap_create`.
+
+2.  **`pcap_activate` should only be called once per `pcap_t` instance:** The first check `if (pcap_check_activated(p))` explicitly prevents re-activation of an already activated `pcap_t`. This means you cannot call `pcap_activate` on the same `pcap_t` object more than once.
+
+3.  **The `p->activate_op` must be a valid function pointer:** This internal operation pointer is responsible for the actual activation logic specific to the underlying network interface or capture source. It must be set correctly before `pcap_activate` is called.
+
+4.  **The `p->setnonblock_op` and `p->cleanup_op` must be valid function pointers if `p->opt.nonblock` is set:** If the caller has requested non-blocking mode before calling `pcap_activate` (by setting `p->opt.nonblock` to true), then the `setnonblock_op` and `cleanup_op` must also be valid function pointers to handle the non-blocking setup and potential rollback.
+
+5.  **The `p->errbuf` must be a valid buffer for error messages:** The function uses `p->errbuf` to store error messages if the activation fails and no specific error message is provided by `p->activate_op`.
+
+6.  **`pcap_statustostr` function must be available:** This helper function is used to translate numerical error codes into human-readable strings.
+
+## Task 2: Complete Code Example in Linux
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <pcap.h>
+#include <string.h> // For strncpy and snprintf
+#include <errno.h>  // For errno
+
+// Dummy implementations for internal libpcap operations to make the example compile.
+// In a real libpcap usage, these would be provided by the library.
+
+// Structure to mimic pcap_t for this example.
+// In a real scenario, you'd get this from pcap_open_live or pcap_create.
+struct pcap_s {
+    int activated;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    struct {
+        int nonblock;
+    } opt;
+    int (*activate_op)(struct pcap_s *);
+    int (*setnonblock_op)(struct pcap_s *, int);
+    void (*cleanup_op)(struct pcap_s *);
+};
+
+// Forward declaration of initialize_ops if it were external
+void initialize_ops(pcap_t *p);
+
+// Dummy implementation of pcap_check_activated
+int pcap_check_activated(pcap_t *p) {
+    if (p == NULL) return 0; // Should ideally handle NULL pcap_t
+    return p->activated;
+}
+
+// Dummy implementation of pcap_statustostr
+const char *pcap_statustostr(int error) {
+    switch (error) {
+        case PCAP_ERROR_ACTIVATED:
+            return "pcap_activate() called on an already activated descriptor.";
+        case -1: // Example error for dummy activate_op
+            return "Generic activation error.";
+        case -2: // Example error for dummy setnonblock_op
+            return "Error setting non-blocking mode.";
+        default:
+            return "Unknown pcap error.";
+    }
+}
+
+// Dummy implementation of initialize_ops
+void initialize_ops(pcap_t *p) {
+    if (p == NULL) return;
+    p->activate_op = NULL;
+    p->setnonblock_op = NULL;
+    p->cleanup_op = NULL;
+    // Resetting activated status for demonstration, though pcap_activate doesn't do this on failure.
+    // In real libpcap, the state after failure might be complex.
+    // p->activated = 0;
+}
+
+// --- Mock `activate_op` for demonstration ---
+// This mock will simulate a successful activation first, then a failure.
+int mock_activate_op_success(pcap_t *p) {
+    printf("Mock activate_op: Simulating successful activation.\n");
+    fflush(stdout);
+    // In a real scenario, this would set up the capture device, etc.
+    // For this mock, we just assume it's successful.
+    return 0; // Success
+}
+
+int mock_activate_op_fail(pcap_t *p) {
+    printf("Mock activate_op: Simulating activation failure.\n");
+    fflush(stdout);
+    strncpy(p->errbuf, "Simulated activation error from mock_activate_op_fail", PCAP_ERRBUF_SIZE - 1);
+    p->errbuf[PCAP_ERRBUF_SIZE - 1] = '\0'; // Ensure null termination
+    return -1; // Failure
+}
+
+// --- Mock `setnonblock_op` for demonstration ---
+int mock_setnonblock_op_success(pcap_t *p, int enable) {
+    printf("Mock setnonblock_op: Setting non-blocking to %d.\n", enable);
+    fflush(stdout);
+    p->opt.nonblock = enable;
+    return 0; // Success
+}
+
+int mock_setnonblock_op_fail(pcap_t *p, int enable) {
+    printf("Mock setnonblock_op: Simulating failure to set non-blocking to %d.\n", enable);
+    fflush(stdout);
+    strncpy(p->errbuf, "Simulated non-blocking mode error from mock_setnonblock_op_fail", PCAP_ERRBUF_SIZE - 1);
+    p->errbuf[PCAP_ERRBUF_SIZE - 1] = '\0'; // Ensure null termination
+    return -2; // Failure
+}
+
+// --- Mock `cleanup_op` for demonstration ---
+void mock_cleanup_op(pcap_t *p) {
+    printf("Mock cleanup_op: Performing cleanup.\n");
+    fflush(stdout);
+    // In a real scenario, this would release resources.
+}
+
+// --- The pcap_activate function from the problem description ---
+int pcap_activate(pcap_t *p){
+	int status;
+
+	/*
+	 * Catch attempts to re-activate an already-activated
+	 * pcap_t; this should, for example, catch code that
+	 * calls pcap_open_live() followed by pcap_activate(),
+	 * as some code that showed up in a Stack Exchange
+	 * question did.
+	 */
+	if (pcap_check_activated(p))
+		return (PCAP_ERROR_ACTIVATED);
+	status = p->activate_op(p);
+	if (status >= 0) {
+		/*
+		 * If somebody requested non-blocking mode before
+		 * calling pcap_activate(), turn it on now.
+		 */
+		if (p->opt.nonblock) {
+			status = p->setnonblock_op(p, 1);
+			if (status < 0) {
+				/*
+				 * Failed.  Undo everything done by
+				 * the activate operation.
+				 */
+				p->cleanup_op(p);
+				initialize_ops(p);
+				return (status);
+			}
+		}
+		p->activated = 1;
+	} else {
+		if (p->errbuf[0] == '\0') {
+			/*
+			 * No error message supplied by the activate routine;
+			 * for the benefit of programs that don't specially
+			 * handle errors other than PCAP_ERROR, return the
+			 * error message corresponding to the status.
+			 */
+			snprintf(p->errbuf, PCAP_ERRBUF_SIZE, "%s",
+			    pcap_statustostr(status));
+		}
+
+		/*
+		 * Undo any operation pointer setting, etc. done by
+		 * the activate operation.
+		 */
+		initialize_ops(p);
+	}
+	return (status);
+}
+
+
+int main() {
+    pcap_t *handle = NULL;
+    int ret;
+
+    // --- Scenario 1: Successful Activation ---
+    printf("--- Running Scenario 1: Successful Activation ---\n");
+    fflush(stdout);
+
+    // Initialize a dummy pcap_t structure
+    handle = malloc(sizeof(pcap_t));
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to allocate memory for pcap_t.\n");
+        fflush(stderr);
+        return 123;
+    }
+    memset(handle, 0, sizeof(pcap_t)); // Zero out the structure
+    handle->errbuf[0] = '\0'; // Clear error buffer
+
+    // Set mock operation pointers for success
+    handle->activate_op = mock_activate_op_success;
+    handle->setnonblock_op = mock_setnonblock_op_success;
+    handle->cleanup_op = mock_cleanup_op;
+
+    // Simulate non-blocking mode requested before activation
+    handle->opt.nonblock = 1;
+
+    printf("before pcap_activate\n");
+    fflush(stdout);
+    ret = pcap_activate(handle);
+
+    if (ret >= 0) {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+        // In a real program, you would now proceed to capture packets.
+        // For this example, we just confirm activation.
+        if (handle->activated) {
+            printf("pcap_t is now activated.\n");
+            fflush(stdout);
+        } else {
+            fprintf(stderr, "pcap_t should be activated but is not.\n");
+            fflush(stderr);
+        }
+        // Clean up resources if successfully activated
+        if (handle->cleanup_op) {
+            handle->cleanup_op(handle);
+        }
+    } else {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        fprintf(stderr, "pcap_activate returned error: %d. Error message: %s\n", ret, handle->errbuf);
+        fflush(stderr);
+        // Even on failure, if cleanup_op was set, it might have been called.
+        // Ensure operations are reset.
+        initialize_ops(handle);
+    }
+
+    free(handle);
+    handle = NULL;
+    printf("\n--- Scenario 1 Complete ---\n\n");
+    fflush(stdout);
+
+
+    // --- Scenario 2: Activation Failure ---
+    printf("--- Running Scenario 2: Activation Failure ---\n");
+    fflush(stdout);
+
+    // Initialize a dummy pcap_t structure
+    handle = malloc(sizeof(pcap_t));
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to allocate memory for pcap_t.\n");
+        fflush(stderr);
+        return 123;
+    }
+    memset(handle, 0, sizeof(pcap_t)); // Zero out the structure
+    handle->errbuf[0] = '\0'; // Clear error buffer
+
+    // Set mock operation pointers for failure in activate_op
+    handle->activate_op = mock_activate_op_fail;
+    handle->setnonblock_op = mock_setnonblock_op_success; // This won't be called if activate_op fails
+    handle->cleanup_op = mock_cleanup_op; // This should be called if activate_op fails and cleanup_op is set
+
+    // Simulate non-blocking mode requested before activation
+    handle->opt.nonblock = 1; // This will trigger the non-blocking setup path
+
+    printf("before pcap_activate\n");
+    fflush(stdout);
+    ret = pcap_activate(handle);
+
+    if (ret >= 0) {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+        // This path should not be taken in this scenario
+        fprintf(stderr, "Unexpected success in scenario 2.\n");
+        fflush(stderr);
+        if (handle->cleanup_op) {
+            handle->cleanup_op(handle);
+        }
+    } else {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        fprintf(stderr, "pcap_activate returned error: %d. Error message: %s\n", ret, handle->errbuf);
+        fflush(stderr);
+        // Ensure operations are reset.
+        initialize_ops(handle);
+    }
+
+    free(handle);
+    handle = NULL;
+    printf("\n--- Scenario 2 Complete ---\n\n");
+    fflush(stdout);
+
+
+    // --- Scenario 3: Non-blocking Setup Failure ---
+    printf("--- Running Scenario 3: Non-blocking Setup Failure ---\n");
+    fflush(stdout);
+
+    // Initialize a dummy pcap_t structure
+    handle = malloc(sizeof(pcap_t));
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to allocate memory for pcap_t.\n");
+        fflush(stderr);
+        return 123;
+    }
+    memset(handle, 0, sizeof(pcap_t)); // Zero out the structure
+    handle->errbuf[0] = '\0'; // Clear error buffer
+
+    // Set mock operation pointers: activate_op succeeds, setnonblock_op fails
+    handle->activate_op = mock_activate_op_success; // This will succeed first
+    handle->setnonblock_op = mock_setnonblock_op_fail; // This will fail
+    handle->cleanup_op = mock_cleanup_op; // This should be called on setnonblock_op failure
+
+    // Simulate non-blocking mode requested before activation
+    handle->opt.nonblock = 1;
+
+    printf("before pcap_activate\n");
+    fflush(stdout);
+    ret = pcap_activate(handle);
+
+    if (ret >= 0) {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+        // This path should not be taken in this scenario
+        fprintf(stderr, "Unexpected success in scenario 3.\n");
+        fflush(stderr);
+        if (handle->cleanup_op) {
+            handle->cleanup_op(handle);
+        }
+    } else {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        fprintf(stderr, "pcap_activate returned error: %d. Error message: %s\n", ret, handle->errbuf);
+        fflush(stderr);
+        // Ensure operations are reset.
+        initialize_ops(handle);
+    }
+
+    free(handle);
+    handle = NULL;
+    printf("\n--- Scenario 3 Complete ---\n\n");
+    fflush(stdout);
+
+    // --- Scenario 4: Already Activated ---
+    printf("--- Running Scenario 4: Already Activated ---\n");
+    fflush(stdout);
+
+    // Initialize a dummy pcap_t structure
+    handle = malloc(sizeof(pcap_t));
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to allocate memory for pcap_t.\n");
+        fflush(stderr);
+        return 123;
+    }
+    memset(handle, 0, sizeof(pcap_t)); // Zero out the structure
+    handle->errbuf[0] = '\0'; // Clear error buffer
+
+    // Manually set activated flag to true
+    handle->activated = 1;
+
+    // Set mock operation pointers (these won't be called due to the initial check)
+    handle->activate_op = mock_activate_op_success;
+    handle->setnonblock_op = mock_setnonblock_op_success;
+    handle->cleanup_op = mock_cleanup_op;
+
+    printf("before pcap_activate\n");
+    fflush(stdout);
+    ret = pcap_activate(handle);
+
+    if (ret >= 0) {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+        // This path should not be taken in this scenario
+        fprintf(stderr, "Unexpected success in scenario 4.\n");
+        fflush(stderr);
+    } else {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        fprintf(stderr, "pcap_activate returned error: %d. Error message: %s\n", ret, handle->errbuf);
+        fflush(stderr);
+        // Ensure operations are reset.
+        initialize_ops(handle);
+    }
+
+    free(handle);
+    handle = NULL;
+    printf("\n--- Scenario 4 Complete ---\n\n");
+    fflush(stdout);
+
+    return 0;
+}
+```
+ parse code: 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <pcap.h>
+
+
+// Dummy implementations for internal libpcap operations to make the example compile.
+// In a real libpcap usage, these would be provided by the library.
+
+// Structure to mimic pcap_t for this example.
+// In a real scenario, you'd get this from pcap_open_live or pcap_create.
+struct pcap_s {
+    int activated;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    struct {
+        int nonblock;
+    } opt;
+    int (*activate_op)(struct pcap_s *);
+    int (*setnonblock_op)(struct pcap_s *, int);
+    void (*cleanup_op)(struct pcap_s *);
+};
+
+// Forward declaration of initialize_ops if it were external
+void initialize_ops(pcap_t *p);
+
+// Dummy implementation of pcap_check_activated
+int pcap_check_activated(pcap_t *p) {
+    if (p == NULL) return 0; // Should ideally handle NULL pcap_t
+    return p->activated;
+}
+
+// Dummy implementation of pcap_statustostr
+const char *pcap_statustostr(int error) {
+    switch (error) {
+        case PCAP_ERROR_ACTIVATED:
+            return "pcap_activate() called on an already activated descriptor.";
+        case -1: // Example error for dummy activate_op
+            return "Generic activation error.";
+        case -2: // Example error for dummy setnonblock_op
+            return "Error setting non-blocking mode.";
+        default:
+            return "Unknown pcap error.";
+    }
+}
+
+// Dummy implementation of initialize_ops
+void initialize_ops(pcap_t *p) {
+    if (p == NULL) return;
+    p->activate_op = NULL;
+    p->setnonblock_op = NULL;
+    p->cleanup_op = NULL;
+    // Resetting activated status for demonstration, though pcap_activate doesn't do this on failure.
+    // In real libpcap, the state after failure might be complex.
+    // p->activated = 0;
+}
+
+// --- Mock `activate_op` for demonstration ---
+// This mock will simulate a successful activation first, then a failure.
+int mock_activate_op_success(pcap_t *p) {
+    printf("Mock activate_op: Simulating successful activation.\n");
+    fflush(stdout);
+    // In a real scenario, this would set up the capture device, etc.
+    // For this mock, we just assume it's successful.
+    return 0; // Success
+}
+
+int mock_activate_op_fail(pcap_t *p) {
+    printf("Mock activate_op: Simulating activation failure.\n");
+    fflush(stdout);
+    strncpy(p->errbuf, "Simulated activation error from mock_activate_op_fail", PCAP_ERRBUF_SIZE - 1);
+    p->errbuf[PCAP_ERRBUF_SIZE - 1] = '\0'; // Ensure null termination
+    return -1; // Failure
+}
+
+// --- Mock `setnonblock_op` for demonstration ---
+int mock_setnonblock_op_success(pcap_t *p, int enable) {
+    printf("Mock setnonblock_op: Setting non-blocking to %d.\n", enable);
+    fflush(stdout);
+    p->opt.nonblock = enable;
+    return 0; // Success
+}
+
+int mock_setnonblock_op_fail(pcap_t *p, int enable) {
+    printf("Mock setnonblock_op: Simulating failure to set non-blocking to %d.\n", enable);
+    fflush(stdout);
+    strncpy(p->errbuf, "Simulated non-blocking mode error from mock_setnonblock_op_fail", PCAP_ERRBUF_SIZE - 1);
+    p->errbuf[PCAP_ERRBUF_SIZE - 1] = '\0'; // Ensure null termination
+    return -2; // Failure
+}
+
+// --- Mock `cleanup_op` for demonstration ---
+void mock_cleanup_op(pcap_t *p) {
+    printf("Mock cleanup_op: Performing cleanup.\n");
+    fflush(stdout);
+    // In a real scenario, this would release resources.
+}
+
+// --- The pcap_activate function from the problem description ---
+int pcap_activate(pcap_t *p){
+	int status;
+
+	/*
+	 * Catch attempts to re-activate an already-activated
+	 * pcap_t; this should, for example, catch code that
+	 * calls pcap_open_live() followed by pcap_activate(),
+	 * as some code that showed up in a Stack Exchange
+	 * question did.
+	 */
+	if (pcap_check_activated(p))
+		return (PCAP_ERROR_ACTIVATED);
+	status = p->activate_op(p);
+	if (status >= 0) {
+		/*
+		 * If somebody requested non-blocking mode before
+		 * calling pcap_activate(), turn it on now.
+		 */
+		if (p->opt.nonblock) {
+			status = p->setnonblock_op(p, 1);
+			if (status < 0) {
+				/*
+				 * Failed.  Undo everything done by
+				 * the activate operation.
+				 */
+				p->cleanup_op(p);
+				initialize_ops(p);
+				return (status);
+			}
+		}
+		p->activated = 1;
+	} else {
+		if (p->errbuf[0] == '\0') {
+			/*
+			 * No error message supplied by the activate routine;
+			 * for the benefit of programs that don't specially
+			 * handle errors other than PCAP_ERROR, return the
+			 * error message corresponding to the status.
+			 */
+			snprintf(p->errbuf, PCAP_ERRBUF_SIZE, "%s",
+			    pcap_statustostr(status));
+		}
+
+		/*
+		 * Undo any operation pointer setting, etc. done by
+		 * the activate operation.
+		 */
+		initialize_ops(p);
+	}
+	return (status);
+}
+
+
+int main() {
+    pcap_t *handle = NULL;
+    int ret;
+
+    // --- Scenario 1: Successful Activation ---
+    printf("--- Running Scenario 1: Successful Activation ---\n");
+    fflush(stdout);
+
+    // Initialize a dummy pcap_t structure
+    handle = malloc(sizeof(pcap_t));
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to allocate memory for pcap_t.\n");
+        fflush(stderr);
+        return 123;
+    }
+    memset(handle, 0, sizeof(pcap_t)); // Zero out the structure
+    handle->errbuf[0] = '\0'; // Clear error buffer
+
+    // Set mock operation pointers for success
+    handle->activate_op = mock_activate_op_success;
+    handle->setnonblock_op = mock_setnonblock_op_success;
+    handle->cleanup_op = mock_cleanup_op;
+
+    // Simulate non-blocking mode requested before activation
+    handle->opt.nonblock = 1;
+
+    printf("before pcap_activate\n");
+    fflush(stdout);
+    ret = pcap_activate(handle);
+
+    if (ret >= 0) {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+        // In a real program, you would now proceed to capture packets.
+        // For this example, we just confirm activation.
+        if (handle->activated) {
+            printf("pcap_t is now activated.\n");
+            fflush(stdout);
+        } else {
+            fprintf(stderr, "pcap_t should be activated but is not.\n");
+            fflush(stderr);
+        }
+        // Clean up resources if successfully activated
+        if (handle->cleanup_op) {
+            handle->cleanup_op(handle);
+        }
+    } else {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        fprintf(stderr, "pcap_activate returned error: %d. Error message: %s\n", ret, handle->errbuf);
+        fflush(stderr);
+        // Even on failure, if cleanup_op was set, it might have been called.
+        // Ensure operations are reset.
+        initialize_ops(handle);
+    }
+
+    free(handle);
+    handle = NULL;
+    printf("\n--- Scenario 1 Complete ---\n\n");
+    fflush(stdout);
+
+
+    // --- Scenario 2: Activation Failure ---
+    printf("--- Running Scenario 2: Activation Failure ---\n");
+    fflush(stdout);
+
+    // Initialize a dummy pcap_t structure
+    handle = malloc(sizeof(pcap_t));
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to allocate memory for pcap_t.\n");
+        fflush(stderr);
+        return 123;
+    }
+    memset(handle, 0, sizeof(pcap_t)); // Zero out the structure
+    handle->errbuf[0] = '\0'; // Clear error buffer
+
+    // Set mock operation pointers for failure in activate_op
+    handle->activate_op = mock_activate_op_fail;
+    handle->setnonblock_op = mock_setnonblock_op_success; // This won't be called if activate_op fails
+    handle->cleanup_op = mock_cleanup_op; // This should be called if activate_op fails and cleanup_op is set
+
+    // Simulate non-blocking mode requested before activation
+    handle->opt.nonblock = 1; // This will trigger the non-blocking setup path
+
+    printf("before pcap_activate\n");
+    fflush(stdout);
+    ret = pcap_activate(handle);
+
+    if (ret >= 0) {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+        // This path should not be taken in this scenario
+        fprintf(stderr, "Unexpected success in scenario 2.\n");
+        fflush(stderr);
+        if (handle->cleanup_op) {
+            handle->cleanup_op(handle);
+        }
+    } else {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        fprintf(stderr, "pcap_activate returned error: %d. Error message: %s\n", ret, handle->errbuf);
+        fflush(stderr);
+        // Ensure operations are reset.
+        initialize_ops(handle);
+    }
+
+    free(handle);
+    handle = NULL;
+    printf("\n--- Scenario 2 Complete ---\n\n");
+    fflush(stdout);
+
+
+    // --- Scenario 3: Non-blocking Setup Failure ---
+    printf("--- Running Scenario 3: Non-blocking Setup Failure ---\n");
+    fflush(stdout);
+
+    // Initialize a dummy pcap_t structure
+    handle = malloc(sizeof(pcap_t));
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to allocate memory for pcap_t.\n");
+        fflush(stderr);
+        return 123;
+    }
+    memset(handle, 0, sizeof(pcap_t)); // Zero out the structure
+    handle->errbuf[0] = '\0'; // Clear error buffer
+
+    // Set mock operation pointers: activate_op succeeds, setnonblock_op fails
+    handle->activate_op = mock_activate_op_success; // This will succeed first
+    handle->setnonblock_op = mock_setnonblock_op_fail; // This will fail
+    handle->cleanup_op = mock_cleanup_op; // This should be called on setnonblock_op failure
+
+    // Simulate non-blocking mode requested before activation
+    handle->opt.nonblock = 1;
+
+    printf("before pcap_activate\n");
+    fflush(stdout);
+    ret = pcap_activate(handle);
+
+    if (ret >= 0) {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+        // This path should not be taken in this scenario
+        fprintf(stderr, "Unexpected success in scenario 3.\n");
+        fflush(stderr);
+        if (handle->cleanup_op) {
+            handle->cleanup_op(handle);
+        }
+    } else {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        fprintf(stderr, "pcap_activate returned error: %d. Error message: %s\n", ret, handle->errbuf);
+        fflush(stderr);
+        // Ensure operations are reset.
+        initialize_ops(handle);
+    }
+
+    free(handle);
+    handle = NULL;
+    printf("\n--- Scenario 3 Complete ---\n\n");
+    fflush(stdout);
+
+    // --- Scenario 4: Already Activated ---
+    printf("--- Running Scenario 4: Already Activated ---\n");
+    fflush(stdout);
+
+    // Initialize a dummy pcap_t structure
+    handle = malloc(sizeof(pcap_t));
+    if (handle == NULL) {
+        fprintf(stderr, "Failed to allocate memory for pcap_t.\n");
+        fflush(stderr);
+        return 123;
+    }
+    memset(handle, 0, sizeof(pcap_t)); // Zero out the structure
+    handle->errbuf[0] = '\0'; // Clear error buffer
+
+    // Manually set activated flag to true
+    handle->activated = 1;
+
+    // Set mock operation pointers (these won't be called due to the initial check)
+    handle->activate_op = mock_activate_op_success;
+    handle->setnonblock_op = mock_setnonblock_op_success;
+    handle->cleanup_op = mock_cleanup_op;
+
+    printf("before pcap_activate\n");
+    fflush(stdout);
+    ret = pcap_activate(handle);
+
+    if (ret >= 0) {
+        printf("Calling pcap_activate success\n");
+        fflush(stdout);
+        // This path should not be taken in this scenario
+        fprintf(stderr, "Unexpected success in scenario 4.\n");
+        fflush(stderr);
+    } else {
+        printf("Calling pcap_activate fail\n");
+        fflush(stdout);
+        fprintf(stderr, "pcap_activate returned error: %d. Error message: %s\n", ret, handle->errbuf);
+        fflush(stderr);
+        // Ensure operations are reset.
+        initialize_ops(handle);
+    }
+
+    free(handle);
+    handle = NULL;
+    printf("\n--- Scenario 4 Complete ---\n\n");
+    fflush(stdout);
+
+    return 0;
+}
+
+
+ Run result: 
+False
+Don't add definition of pcap_activate! pcap_activate is an API of library.
+Break cant parse code. token_right: 21238. Token_one: 4735
+Answer: 
