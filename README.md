@@ -350,11 +350,6 @@ Pre-run results for all ablation configurations are committed to `results/` so t
 
 `results/depth_compare/` contains a focused run of `pcap_list_datalinks` at `retrieval_depth=0` (baseline) and `retrieval_depth=1` with `max_rules_per_api=5`, used to compare token usage and rule quality between depths on a single API.
 
-| Variant | Final Rules | Valid Violations | Invalid Violations | Precision | All Tokens |
-|---------|-------------|------------------|--------------------|-----------|------------|
-| baseline (`depth=0`) | 4 | 1 | 0 | 100% | 31,222 |
-| depth=1 | 3 | 1 | 1 | 50% | 61,721 |
-
 ### Reproducing the depth_compare results
 
 Prerequisites: Docker running (`docker ps`), `.env` configured with `GEMINI_API_KEY` and `GEMINI_MODEL`.
