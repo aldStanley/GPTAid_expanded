@@ -21,6 +21,7 @@ This project extends the original 3-stage pipeline with two enhancements:
 | Dataset | `test_info/` | 20 libpcap APIs, call graph, per-function source |
 | Pre-run results | `results/` | Ablation outputs — see [Evaluation](#evaluation) section |
 | Context measurement | `measure_context.py` | Measures Stage 1 prompt token counts across retrieval depths |
+| Critic evaluation | `src/eval_critic_execution.py` | Confusion matrix: cross-references critic decisions against execution ground truth |
 | Milestone documents | `milestones/` | Proposal, progress report, and future submissions |
 
 ---
@@ -47,6 +48,7 @@ All assignment submissions are in the `milestones/` folder:
 │   ├── auto_gen_final_parse.py   # Stage 3 — rule refinement (+ Critic Agent)
 │   ├── parse_wrong_diff.py       # Helper: code-diff parsing
 │   ├── identify_error.py         # Helper: runtime error classification
+│   ├── eval_critic_execution.py  # Critic Agent confusion matrix (vs execution ground truth)
 │   └── preprocess/
 │       ├── get-graph-treesitter.py   # Extract per-function source code
 │       └── gen_callgraph.py          # Build inter-procedural call graph
@@ -403,6 +405,23 @@ for label in ['baseline', 'depth1']:
 ```bash
 python3 measure_context.py pcap_list_datalinks
 python3 measure_context.py pcap_parsesrcstr_ex   # only API with resolvable depth=2 callees
+```
+
+### Critic Agent Confusion Matrix
+
+`src/eval_critic_execution.py` cross-references Critic Agent APPROVE/REJECT decisions against Stage 3's execution ground truth (whether a rule's violation code triggered a confirmed runtime error) to produce a per-rule confusion matrix. Run it against any pre-stored result directory:
+
+```bash
+python3 src/eval_critic_execution.py                        # default: criticOnly + full
+python3 src/eval_critic_execution.py results/criticOnly     # single directory
+```
+
+Output includes a per-API breakdown table and a `critic_confusion_matrix.jsonl` saved to each result directory. No API calls are made — it uses only pre-stored log files.
+
+The config used to generate the `results/criticOnly` data:
+
+```json
+{ "retrieval_depth": 0, "critic_agent": true, "result_dir": "../results/criticOnly", "max_rules_per_api": 5 }
 ```
 
 ### Evaluation Analysis
